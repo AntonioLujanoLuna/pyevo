@@ -76,6 +76,8 @@ def parse_args():
                         help='Number of frames to include in the animation')
     parser.add_argument('--gif-fps', type=float, default=10,
                         help='Frames per second in the animation')
+    parser.add_argument('--display-interval', type=int, default=50,
+                        help='How often to update the display (every N epochs)')
     parser.add_argument('--no-display', action='store_true',
                         help='Do not display live progress')
     parser.add_argument('--workers', '-w', type=int, default=None,
@@ -92,6 +94,8 @@ def parse_args():
                         help='Size of solution cache for fitness evaluation')
     parser.add_argument('--quality-metrics', '-q', action='store_true',
                         help='Calculate and display additional quality metrics (SSIM)')
+    parser.add_argument('--gpu-batch-size', type=int, default=None,
+                        help='Batch size for GPU processing (default: auto-configured based on GPU memory)')
     return parser.parse_args()
 
 def sigmoid(x):
@@ -168,12 +172,12 @@ def solution_hash(solution, num_rects, precision=3):
     rounded = np.round(solution, precision)
     return hashlib.md5(rounded.tobytes()).hexdigest()
 
-def draw_solution_batch(solution, width, height, num_rects, param_count, use_gpu=False):
+def draw_solution_batch(solution, width, height, num_rects, param_count, use_gpu=False, gpu_batch_size=None):
     """
     Draw rectangles in batches for better performance using NumPy/CuPy operations.
     
     This method is optimized for larger numbers of rectangles by using
-    batch processing and alpha compositing.
+    batch processing and alpha compositing, with special optimizations for GPU.
     
     Args:
         solution (numpy.ndarray): Solution parameters.
@@ -182,6 +186,7 @@ def draw_solution_batch(solution, width, height, num_rects, param_count, use_gpu
         num_rects (int): Number of rectangles to draw.
         param_count (int): Number of parameters per rectangle.
         use_gpu (bool, optional): Whether to use GPU acceleration via CuPy.
+        gpu_batch_size (int, optional): User-specified batch size for GPU processing.
         
     Returns:
         numpy.ndarray: RGB image as a NumPy array.
@@ -189,14 +194,24 @@ def draw_solution_batch(solution, width, height, num_rects, param_count, use_gpu
     # Choose the right array library based on GPU usage
     xp = cp if use_gpu and HAS_CUPY else np
     
+    # Ensure solution is on the correct device (CPU or GPU)
+    if use_gpu and HAS_CUPY:
+        # Only transfer to GPU if it's not already there
+        if not isinstance(solution, cp.ndarray):
+            solution_device = cp.asarray(solution)
+        else:
+            solution_device = solution
+    else:
+        solution_device = solution
+    
     # Create a blank RGBA image (using alpha channel for faster compositing)
     img_array = xp.ones((height, width, 4), dtype=xp.uint8) * 255
     img_array[:, :, 3] = 0  # Start with transparent image
     
     # Reshape solution into a 2D array for vectorized operations
-    solution_reshaped = xp.asarray(solution.reshape(num_rects, param_count)) if use_gpu and HAS_CUPY else solution.reshape(num_rects, param_count)
+    solution_reshaped = solution_device.reshape(num_rects, param_count)
     
-    # Vectorized calculations
+    # Vectorized calculations - precompute all parameters at once
     x = width / 2 + (solution_reshaped[:, 0] * width) / 2
     y = height / 2 + (solution_reshaped[:, 1] * height) / 2
     w = (softplus(solution_reshaped[:, 2]) * width) / 8
@@ -212,8 +227,17 @@ def draw_solution_batch(solution, width, height, num_rects, param_count, use_gpu
     areas = w * h
     size_indices = xp.argsort(areas)
     
-    # Batch size based on rectangle count
-    batch_size = max(1, min(50, num_rects // 10))
+    # Optimize batch size for GPU vs CPU
+    if use_gpu and HAS_CUPY:
+        # Use user-specified batch size or default
+        if gpu_batch_size is not None:
+            batch_size = gpu_batch_size
+        else:
+            # Larger batches for GPU to better utilize parallelism
+            batch_size = max(50, min(200, num_rects // 4))
+    else:
+        # Smaller batches for CPU to better use cache
+        batch_size = max(1, min(50, num_rects // 10))
     
     # Process in batches from small to large
     for batch_start in range(0, num_rects, batch_size):
@@ -223,25 +247,50 @@ def draw_solution_batch(solution, width, height, num_rects, param_count, use_gpu
         # Create a temporary buffer for this batch
         batch_buffer = xp.zeros((height, width, 4), dtype=xp.uint8)
         
-        # Draw each rectangle in this batch
-        for idx in batch_indices:
-            # Calculate rectangle coordinates
-            x1 = max(0, int(x[idx] - w[idx]/2))
-            y1 = max(0, int(y[idx] - h[idx]/2))
-            x2 = min(width, int(x[idx] + w[idx]/2))
-            y2 = min(height, int(y[idx] + h[idx]/2))
+        if use_gpu and HAS_CUPY and len(batch_indices) > 20:
+            # For GPU, use vectorized operations for large batches
             
-            # Skip rectangles that are too small
-            if x2 <= x1 or y2 <= y1:
-                continue
+            # Pre-calculate rectangle coordinates for all in batch
+            x1s = xp.maximum(0, (x[batch_indices] - w[batch_indices]/2).astype(xp.int32))
+            y1s = xp.maximum(0, (y[batch_indices] - h[batch_indices]/2).astype(xp.int32))
+            x2s = xp.minimum(width, (x[batch_indices] + w[batch_indices]/2).astype(xp.int32))
+            y2s = xp.minimum(height, (y[batch_indices] + h[batch_indices]/2).astype(xp.int32))
             
-            # Assign color to the rectangle area (RGBA)
-            batch_buffer[y1:y2, x1:x2, 0] = r[idx]
-            batch_buffer[y1:y2, x1:x2, 1] = g[idx]
-            batch_buffer[y1:y2, x1:x2, 2] = b[idx]
-            batch_buffer[y1:y2, x1:x2, 3] = 255  # Fully opaque
+            # Filter out too small rectangles
+            valid_mask = (x2s > x1s) & (y2s > y1s)
+            valid_indices = xp.where(valid_mask)[0]
+            
+            # Process valid rectangles
+            for i in valid_indices:
+                idx = batch_indices[i]
+                x1, y1 = x1s[i], y1s[i]
+                x2, y2 = x2s[i], y2s[i]
+                
+                # Assign color to the rectangle area (RGBA)
+                batch_buffer[y1:y2, x1:x2, 0] = r[idx]
+                batch_buffer[y1:y2, x1:x2, 1] = g[idx]
+                batch_buffer[y1:y2, x1:x2, 2] = b[idx]
+                batch_buffer[y1:y2, x1:x2, 3] = 255  # Fully opaque
+        else:
+            # For CPU or small batches, use loop-based approach
+            for idx in batch_indices:
+                # Calculate rectangle coordinates
+                x1 = max(0, int(x[idx] - w[idx]/2))
+                y1 = max(0, int(y[idx] - h[idx]/2))
+                x2 = min(width, int(x[idx] + w[idx]/2))
+                y2 = min(height, int(y[idx] + h[idx]/2))
+                
+                # Skip rectangles that are too small
+                if x2 <= x1 or y2 <= y1:
+                    continue
+                
+                # Assign color to the rectangle area (RGBA)
+                batch_buffer[y1:y2, x1:x2, 0] = r[idx]
+                batch_buffer[y1:y2, x1:x2, 1] = g[idx]
+                batch_buffer[y1:y2, x1:x2, 2] = b[idx]
+                batch_buffer[y1:y2, x1:x2, 3] = 255  # Fully opaque
         
-        # Composite this batch with the main image
+        # Composite this batch with the main image - use in-place operations when possible
         alpha = batch_buffer[:, :, 3:4] / 255.0
         img_array[:, :, :3] = (1 - alpha) * img_array[:, :, :3] + alpha * batch_buffer[:, :, :3]
         img_array[:, :, 3] = xp.maximum(img_array[:, :, 3], batch_buffer[:, :, 3])
@@ -255,7 +304,7 @@ def draw_solution_batch(solution, width, height, num_rects, param_count, use_gpu
         
     return result
 
-def draw_solution(solution, width, height, num_rects, param_count, use_gpu=False):
+def draw_solution(solution, width, height, num_rects, param_count, use_gpu=False, gpu_batch_size=None):
     """
     Draw rectangles based on solution parameters using NumPy for better performance.
     
@@ -266,13 +315,14 @@ def draw_solution(solution, width, height, num_rects, param_count, use_gpu=False
         num_rects (int): Number of rectangles to draw.
         param_count (int): Number of parameters per rectangle.
         use_gpu (bool, optional): Whether to use GPU acceleration via CuPy.
+        gpu_batch_size (int, optional): User-specified batch size for GPU processing.
         
     Returns:
         numpy.ndarray: RGB image as a NumPy array.
     """
     # Use batch drawing method for larger rectangle counts
     if num_rects > 50:
-        return draw_solution_batch(solution, width, height, num_rects, param_count, use_gpu)
+        return draw_solution_batch(solution, width, height, num_rects, param_count, use_gpu, gpu_batch_size)
     
     # Create a blank white image as NumPy array
     if use_gpu and HAS_CUPY:
@@ -323,7 +373,7 @@ def draw_solution(solution, width, height, num_rects, param_count, use_gpu=False
         
     return img_array
 
-def fitness(solution, target_image, num_rects, param_count, width, height, use_gpu=False, use_cache=True):
+def fitness(solution, target_image, num_rects, param_count, width, height, use_gpu=False, use_cache=True, gpu_batch_size=None):
     """
     Calculate negative squared error between solution image and target.
     
@@ -336,6 +386,7 @@ def fitness(solution, target_image, num_rects, param_count, width, height, use_g
         height (int): Image height.
         use_gpu (bool, optional): Whether to use GPU acceleration via CuPy.
         use_cache (bool, optional): Whether to use solution caching.
+        gpu_batch_size (int, optional): User-specified batch size for GPU processing.
         
     Returns:
         float: Negative MSE (higher is better).
@@ -346,21 +397,35 @@ def fitness(solution, target_image, num_rects, param_count, width, height, use_g
         if solution_key in solution_cache:
             return solution_cache[solution_key]
     
-    # Draw solution
-    img = draw_solution(solution, width, height, num_rects, param_count, use_gpu)
-    
-    # Calculate error (mean squared error) - use GPU if available
+    # Ensure solution is on the correct device for drawing
     if use_gpu and HAS_CUPY:
+        # Only transfer to GPU if it's not already there
+        if not isinstance(solution, cp.ndarray):
+            solution_gpu = cp.asarray(solution)
+        else:
+            solution_gpu = solution
+        
+        # Draw solution (returns CPU array due to final conversion in draw_solution)
+        img = draw_solution(solution_gpu, width, height, num_rects, param_count, 
+                          use_gpu=True, gpu_batch_size=gpu_batch_size)
+        
         # Handle case where target_image is already on GPU
         if isinstance(target_image, cp.ndarray):
             target_gpu = target_image
         else:
             target_gpu = cp.asarray(target_image)
             
+        # Convert drawn image back to GPU for comparison
         img_gpu = cp.asarray(img)
+        
+        # Calculate error (mean squared error) on GPU
         error = cp.mean((img_gpu.astype(cp.float32) - target_gpu.astype(cp.float32)) ** 2)
-        error = float(error.get())  # Convert back to CPU
+        error = float(error.get())  # Convert scalar back to CPU
     else:
+        # Draw solution on CPU
+        img = draw_solution(solution, width, height, num_rects, param_count, use_gpu=False)
+        
+        # Calculate error on CPU
         error = np.mean((img.astype(np.float32) - target_image.astype(np.float32)) ** 2)
     
     fitness_value = -error
@@ -389,6 +454,10 @@ def create_comparison_image(target_image, solution_image, epoch, max_epochs):
     Returns:
         numpy.ndarray: Comparison image as a NumPy array.
     """
+    # Save current backend and switch to non-interactive backend to avoid window flashing
+    current_backend = plt.get_backend()
+    plt.switch_backend('Agg')  # Use non-interactive backend
+    
     # Create a figure with two subplots
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
     
@@ -411,9 +480,12 @@ def create_comparison_image(target_image, solution_image, epoch, max_epochs):
     comparison = np.array(fig.canvas.renderer.buffer_rgba())
     plt.close(fig)
     
+    # Switch back to original backend
+    plt.switch_backend(current_backend)
+    
     return comparison
 
-def parallel_fitness(solutions, target_image, num_rects, param_count, width, height, max_workers=None, use_gpu=False, use_cache=True):
+def parallel_fitness(solutions, target_image, num_rects, param_count, width, height, max_workers=None, use_gpu=False, use_cache=True, gpu_batch_size=None):
     """
     Evaluate fitness of multiple solutions in parallel.
     
@@ -427,22 +499,58 @@ def parallel_fitness(solutions, target_image, num_rects, param_count, width, hei
         max_workers (int, optional): Maximum number of worker processes.
         use_gpu (bool, optional): Whether to use GPU acceleration via CuPy.
         use_cache (bool, optional): Whether to use solution caching.
+        gpu_batch_size (int, optional): User-specified batch size for GPU processing.
         
     Returns:
         list: List of fitness values for each solution.
     """
-    partial_fitness = functools.partial(
-        fitness, target_image=target_image, num_rects=num_rects, 
-        param_count=param_count, width=width, height=height,
-        use_gpu=use_gpu, use_cache=use_cache
-    )
-    
-    # If using GPU, it's often more efficient to process sequentially
+    # If using GPU, it's often more efficient to process in batches sequentially
+    # rather than using parallel processes which can't efficiently share the GPU
     if use_gpu and HAS_CUPY:
-        return [partial_fitness(solution) for solution in solutions]
-    
-    with ProcessPoolExecutor(max_workers=max_workers) as executor:
-        return list(executor.map(partial_fitness, solutions))
+        # Use larger batches for GPU processing
+        batch_size = min(len(solutions), 16)  # Process 16 solutions at a time
+        results = []
+        
+        # Process in batches
+        for i in range(0, len(solutions), batch_size):
+            batch_end = min(i + batch_size, len(solutions))
+            batch = solutions[i:batch_end]
+            
+            # Process batch sequentially on GPU
+            batch_results = []
+            for solution in batch:
+                # Transfer solution to GPU if it's not already there
+                if not isinstance(solution, cp.ndarray):
+                    solution_gpu = cp.asarray(solution)
+                else:
+                    solution_gpu = solution
+                    
+                # Ensure target image is on GPU
+                if not isinstance(target_image, cp.ndarray):
+                    target_gpu = cp.asarray(target_image)
+                else:
+                    target_gpu = target_image
+                
+                # Compute fitness
+                fit_val = fitness(
+                    solution_gpu, target_gpu, num_rects, 
+                    param_count, width, height, use_gpu=True, 
+                    use_cache=use_cache, gpu_batch_size=gpu_batch_size
+                )
+                batch_results.append(fit_val)
+            
+            results.extend(batch_results)
+        return results
+    else:
+        # For CPU, use process pool for parallel execution
+        partial_fitness = functools.partial(
+            fitness, target_image=target_image, num_rects=num_rects, 
+            param_count=param_count, width=width, height=height,
+            use_gpu=False, use_cache=use_cache
+        )
+        
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            return list(executor.map(partial_fitness, solutions))
 
 def save_animation(frames, output_path, fps=10, format='gif'):
     """
@@ -527,8 +635,14 @@ def main():
     target_image = load_image(args.image, max_size=args.max_size)
     height, width = target_image.shape[:2]
     
-    # Convert target image to GPU if using GPU
-    if args.use_gpu and HAS_CUPY:
+    # Validate GPU usage
+    use_gpu = args.use_gpu and HAS_CUPY
+    if args.use_gpu and not HAS_CUPY:
+        print("Warning: CuPy not available, falling back to CPU")
+    
+    # Transfer target image to GPU if using GPU acceleration
+    if use_gpu and HAS_CUPY:
+        print("Using GPU acceleration with CuPy")
         target_image_gpu = cp.asarray(target_image)
     else:
         target_image_gpu = None
@@ -579,11 +693,6 @@ def main():
         animation_frames = []
         print(f"Will create animation with {frames_to_capture} frames")
     
-    # Validate GPU usage
-    use_gpu = args.use_gpu and HAS_CUPY
-    if args.use_gpu and not HAS_CUPY:
-        print("Warning: CuPy not available, falling back to CPU")
-    
     # Configure solution cache
     global solution_cache
     solution_cache = {}  # Reset cache
@@ -594,39 +703,66 @@ def main():
     best_solution = None
     stagnation_counter = 0
     
-    # Pre-allocate fitness array
-    fitnesses = np.zeros(population_count, dtype=np.float32)
+    # Pre-allocate fitness array - on GPU if using GPU
+    if use_gpu and HAS_CUPY:
+        fitnesses = cp.zeros(population_count, dtype=cp.float32)
+    else:
+        fitnesses = np.zeros(population_count, dtype=np.float32)
     
     # Create progress bar
     pbar = tqdm(range(max_epochs), desc="Optimizing")
     
+    # Warm-up GPU if needed
+    if use_gpu and HAS_CUPY:
+        # Small warm-up to initialize GPU kernels
+        warmup_solution = cp.random.randn(solution_length).astype(cp.float32)
+        _ = fitness(warmup_solution, target_image_gpu, num_rects, param_count, width, height, 
+                  use_gpu=True, use_cache=False, gpu_batch_size=args.gpu_batch_size)
+        print(f"\nGPU warm-up complete")
+    
+    # Display GPU batch size information if using GPU
+    if use_gpu and HAS_CUPY:
+        gpu_batch_size = args.gpu_batch_size if args.gpu_batch_size is not None else "auto"
+        print(f"GPU batch size: {gpu_batch_size}")
+    
     for epoch in pbar:
-        # Generate and evaluate solutions
+        # Generate and evaluate solutions - transfer to GPU if needed
         solutions = optimizer.ask()
+        if use_gpu and HAS_CUPY:
+            solutions_gpu = [cp.asarray(sol) for sol in solutions]
+        else:
+            solutions_gpu = solutions
         
         # Evaluate fitness (parallel if workers specified)
-        if args.workers:
+        if args.workers and not use_gpu:  # Only use parallel CPU workers if not using GPU
             fitnesses = parallel_fitness(
-                solutions, target_image_gpu if args.use_gpu and HAS_CUPY else target_image, 
+                solutions, target_image,
                 num_rects, param_count, width, height, max_workers=args.workers,
-                use_gpu=use_gpu, use_cache=args.cache_size > 0
+                use_gpu=False, use_cache=args.cache_size > 0, gpu_batch_size=args.gpu_batch_size
             )
         else:
-            # Vectorized fitness calculation in batches for better memory usage
-            fitnesses = np.zeros(population_count, dtype=np.float32)
-            
             # Process solutions
             for i in range(population_count):
                 # Calculate fitness with optional GPU acceleration and caching
-                fitnesses[i] = fitness(
-                    solutions[i], 
-                    target_image_gpu if args.use_gpu and HAS_CUPY else target_image,
+                fit_val = fitness(
+                    solutions_gpu[i] if use_gpu and HAS_CUPY else solutions[i], 
+                    target_image_gpu if use_gpu and HAS_CUPY else target_image,
                     num_rects, param_count, width, height, 
-                    use_gpu=use_gpu, use_cache=args.cache_size > 0
+                    use_gpu=use_gpu, use_cache=args.cache_size > 0, gpu_batch_size=args.gpu_batch_size
                 )
+                
+                # Store fitness value
+                if use_gpu and HAS_CUPY:
+                    fitnesses[i] = fit_val
+                else:
+                    fitnesses[i] = fit_val
         
-        # Update optimizer and check for improvement
-        improvement = optimizer.tell(fitnesses, tolerance=args.early_stop)
+        # If on GPU, transfer fitnesses back to CPU for optimizer
+        if use_gpu and HAS_CUPY:
+            fitnesses_cpu = cp.asnumpy(fitnesses)
+            improvement = optimizer.tell(fitnesses_cpu, tolerance=args.early_stop)
+        else:
+            improvement = optimizer.tell(fitnesses, tolerance=args.early_stop)
         
         # Early stopping check
         if improvement < args.early_stop:
@@ -639,10 +775,20 @@ def main():
             break
         
         # Track best solution
-        current_best_idx = np.argmax(fitnesses)
-        if fitnesses[current_best_idx] > best_fitness:
-            best_fitness = fitnesses[current_best_idx]
-            best_solution = solutions[current_best_idx].copy()
+        if use_gpu and HAS_CUPY:
+            current_best_idx = int(cp.argmax(fitnesses).get())
+            current_best_fitness = float(fitnesses[current_best_idx].get())
+        else:
+            current_best_idx = np.argmax(fitnesses)
+            current_best_fitness = fitnesses[current_best_idx]
+            
+        if current_best_fitness > best_fitness:
+            best_fitness = current_best_fitness
+            # Copy the best solution back to CPU if it's on GPU
+            if use_gpu and HAS_CUPY:
+                best_solution = cp.asnumpy(solutions_gpu[current_best_idx]).copy()
+            else:
+                best_solution = solutions[current_best_idx].copy()
             
             # Save checkpoint if requested
             if args.checkpoint:
@@ -651,9 +797,16 @@ def main():
                 checkpoint_path = os.path.join(checkpoint_dir, args.checkpoint)
                 optimizer.save_state(checkpoint_path)
         
-        # Current solution to visualize
+        # Current solution to visualize - get from optimizer
         current_solution = optimizer.get_best_solution()
-        current_img = draw_solution(current_solution, width, height, num_rects, param_count, use_gpu)
+        # Transfer to GPU if needed
+        if use_gpu and HAS_CUPY:
+            current_solution_gpu = cp.asarray(current_solution)
+            current_img = draw_solution(current_solution_gpu, width, height, num_rects, param_count, 
+                                      use_gpu=True, gpu_batch_size=args.gpu_batch_size)
+        else:
+            current_img = draw_solution(current_solution, width, height, num_rects, param_count, 
+                                      use_gpu=False)
         
         # Capture frame for animation if needed
         if creating_animation and (epoch % capture_frequency == 0 or epoch == max_epochs - 1):
@@ -661,7 +814,7 @@ def main():
             animation_frames.append(comparison)
         
         # Visualize progress periodically
-        if (epoch % 50 == 0 or epoch == max_epochs - 1) and not args.no_display:
+        if (epoch % args.display_interval == 0 or epoch == max_epochs - 1) and not args.no_display:
             plt.clf()
             plt.imshow(current_img)
             plt.title(f"Epoch {epoch}/{max_epochs}")
@@ -691,7 +844,15 @@ def main():
     
     # Use either the best found solution or the final center
     final_solution = best_solution if best_solution is not None else optimizer.get_best_solution()
-    final_img = draw_solution(final_solution, width, height, num_rects, param_count, use_gpu)
+    
+    # Draw final image with GPU batch size if using GPU
+    if use_gpu and HAS_CUPY:
+        final_solution_gpu = cp.asarray(final_solution)
+        final_img = draw_solution(final_solution_gpu, width, height, num_rects, param_count, 
+                               use_gpu=True, gpu_batch_size=args.gpu_batch_size)
+    else:
+        final_img = draw_solution(final_solution, width, height, num_rects, param_count, 
+                               use_gpu=False)
     
     # Display final result
     if not args.no_display:

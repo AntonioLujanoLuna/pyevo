@@ -35,7 +35,7 @@ setup(
             "imageio[ffmpeg]",
         ],
         "gpu": [
-            "cupy>=12.0.0",
+            "cupy-cuda12x>=12.0.0",
         ],
         "all": [
             "pillow>=8.0.0",
@@ -43,6 +43,7 @@ setup(
             "imageio>=2.9.0",
             "tqdm>=4.65.0",
             "imageio[ffmpeg]",
+            "cupy>=12.0.0",
         ],
     },
 )
