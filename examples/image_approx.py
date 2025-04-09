@@ -24,6 +24,11 @@ import hashlib
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from snes import SNES
 from utils.image_processing import calculate_ssim, convolve2d
+from utils.constants import (
+    DEFAULT_MAX_IMAGE_SIZE, DEFAULT_RECT_COUNT, DEFAULT_POPULATION_SIZE,
+    DEFAULT_EPOCHS, DEFAULT_ALPHA, DEFAULT_EARLY_STOP, DEFAULT_PATIENCE,
+    DEFAULT_OUTPUT_DIR, DEFAULT_CHECKPOINT_DIR
+)
 
 # We're using our own pure NumPy SSIM implementation
 HAS_SSIM = True
@@ -47,22 +52,22 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Image approximation using SNES')
     parser.add_argument('--image', '-i', type=str, default=None,
                         help='Path to the image (required)')
-    parser.add_argument('--rects', '-r', type=int, default=200,
-                        help='Number of rectangles')
-    parser.add_argument('--max-size', '-m', type=int, default=128,
-                        help='Maximum size for the image (larger images will be resized)')
-    parser.add_argument('--epochs', '-e', type=int, default=1000,
-                        help='Number of generations to evolve')
-    parser.add_argument('--population', '-p', type=int, default=32,
-                        help='Population size')
-    parser.add_argument('--alpha', '-a', type=float, default=0.05,
-                        help='Learning rate')
+    parser.add_argument('--rects', '-r', type=int, default=DEFAULT_RECT_COUNT,
+                        help=f'Number of rectangles (default: {DEFAULT_RECT_COUNT})')
+    parser.add_argument('--max-size', '-m', type=int, default=DEFAULT_MAX_IMAGE_SIZE,
+                        help=f'Maximum size for the image (larger images will be resized) (default: {DEFAULT_MAX_IMAGE_SIZE})')
+    parser.add_argument('--epochs', '-e', type=int, default=DEFAULT_EPOCHS,
+                        help=f'Number of generations to evolve (default: {DEFAULT_EPOCHS})')
+    parser.add_argument('--population', '-p', type=int, default=DEFAULT_POPULATION_SIZE,
+                        help=f'Population size (default: {DEFAULT_POPULATION_SIZE})')
+    parser.add_argument('--alpha', '-a', type=float, default=DEFAULT_ALPHA,
+                        help=f'Learning rate (default: {DEFAULT_ALPHA})')
     parser.add_argument('--seed', '-s', type=int, default=None,
                         help='Random seed')
     parser.add_argument('--output', '-o', type=str, default=None,
                         help='Path to save the final image')
-    parser.add_argument('--output-dir', '-d', type=str, default='output',
-                        help='Directory to save output files (default: output)')
+    parser.add_argument('--output-dir', '-d', type=str, default=DEFAULT_OUTPUT_DIR,
+                        help=f'Directory to save output files (default: {DEFAULT_OUTPUT_DIR})')
     parser.add_argument('--gif', '-g', type=str, default=None,
                         help='Path to save evolution GIF')
     parser.add_argument('--mp4', '-v', type=str, default=None,
@@ -75,10 +80,10 @@ def parse_args():
                         help='Do not display live progress')
     parser.add_argument('--workers', '-w', type=int, default=None,
                         help='Number of worker processes for parallel fitness evaluation')
-    parser.add_argument('--early-stop', type=float, default=1e-6,
-                        help='Early stopping tolerance')
-    parser.add_argument('--patience', type=int, default=10,
-                        help='Number of epochs to wait before early stopping')
+    parser.add_argument('--early-stop', type=float, default=DEFAULT_EARLY_STOP,
+                        help=f'Early stopping tolerance (default: {DEFAULT_EARLY_STOP})')
+    parser.add_argument('--patience', type=int, default=DEFAULT_PATIENCE,
+                        help=f'Number of epochs to wait before early stopping (default: {DEFAULT_PATIENCE})')
     parser.add_argument('--checkpoint', '-c', type=str, default=None,
                         help='Path to save optimizer checkpoint')
     parser.add_argument('--use-gpu', '-gpu', action='store_true',
@@ -113,7 +118,7 @@ def softplus(x):
     """
     return np.log(1.0 + np.exp(x))
 
-def load_image(image_path, max_size=256):
+def load_image(image_path, max_size=DEFAULT_MAX_IMAGE_SIZE):
     """
     Load and resize an image.
     

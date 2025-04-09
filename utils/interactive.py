@@ -311,6 +311,7 @@ def run_interactive_example():
     """Example showing how to use the interactive optimizer."""
     import numpy as np
     from snes import SNES
+    from utils.constants import DEFAULT_CHECKPOINT_DIR
     
     # Define a simple objective function (minimize x^2)
     def objective(x):
@@ -324,7 +325,7 @@ def run_interactive_example():
         optimizer=optimizer,
         fitness_function=objective,
         max_iterations=1000,
-        checkpoint_dir="checkpoints"
+        checkpoint_dir=DEFAULT_CHECKPOINT_DIR
     )
     
     # Start interactive optimization

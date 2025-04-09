@@ -44,6 +44,16 @@ cd pysnes
 pip install -e .
 ```
 
+### Requirements
+- Python 3.6+
+- NumPy (core dependency)
+- Additional dependencies for examples and visualization (automatically installed with `pip install -e ".[examples]"`)
+
+### Optional Dependencies
+- GPU Acceleration: `pip install cupy>=12.0.0`
+- Video Creation: `pip install "imageio[ffmpeg]"`
+- All Example Requirements: `pip install -e ".[all]"`
+
 ## Quick Example
 
 ```python
@@ -197,3 +207,36 @@ if improvement < 1e-6:
 ### Checkpointing
 
 Save and load optimizer state for long-running optimizations:
+
+```python
+# Save optimizer state
+optimizer.save_state("checkpoint.npz")
+
+# Later, load the state and continue
+from snes import SNES
+loaded_optimizer = SNES.load_state("checkpoint.npz")
+
+# Continue optimization
+solutions = loaded_optimizer.ask()
+# ...
+```
+
+## Output Files
+
+By default, output files (images, GIFs, checkpoints) are saved to:
+- `examples/output/` - For generated images and animations
+- `examples/checkpoints/` - For optimizer checkpoints
+
+You can customize these paths using the `--output-dir` and `--checkpoint-dir` arguments.
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## Author
+
+Antonio Lujano Luna ([@antonio-lujano-luna](https://github.com/AntonioLujanoLuna))

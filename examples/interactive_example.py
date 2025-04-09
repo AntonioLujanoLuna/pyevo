@@ -16,20 +16,23 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from snes import SNES
 from utils.interactive import InteractiveOptimizer
+from utils.constants import (
+    DEFAULT_POPULATION_SIZE, DEFAULT_ALPHA, DEFAULT_CHECKPOINT_DIR
+)
 
 def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description='Interactive SNES optimization example')
     parser.add_argument('--dimensions', type=int, default=20,
                       help='Number of dimensions in the problem')
-    parser.add_argument('--population', type=int, default=32,
-                      help='Population size')
+    parser.add_argument('--population', type=int, default=DEFAULT_POPULATION_SIZE,
+                      help=f'Population size (default: {DEFAULT_POPULATION_SIZE})')
     parser.add_argument('--max-iterations', type=int, default=1000,
                       help='Maximum number of iterations')
-    parser.add_argument('--alpha', type=float, default=0.1,
-                      help='Initial learning rate')
-    parser.add_argument('--checkpoint-dir', type=str, default='examples/checkpoints',
-                      help='Directory for checkpoints')
+    parser.add_argument('--alpha', type=float, default=DEFAULT_ALPHA,
+                      help=f'Initial learning rate (default: {DEFAULT_ALPHA})')
+    parser.add_argument('--checkpoint-dir', type=str, default=DEFAULT_CHECKPOINT_DIR,
+                      help=f'Directory for checkpoints (default: {DEFAULT_CHECKPOINT_DIR})')
     parser.add_argument('--load', type=str, default=None,
                       help='Load a previous checkpoint file')
     parser.add_argument('--noise', type=float, default=0.0,

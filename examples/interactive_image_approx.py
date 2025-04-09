@@ -21,6 +21,10 @@ from utils.interactive import InteractiveOptimizer
 from examples.image_approx import (
     load_image, draw_solution, sigmoid, softplus, solution_hash
 )
+from utils.constants import (
+    DEFAULT_MAX_IMAGE_SIZE, DEFAULT_RECT_COUNT, DEFAULT_POPULATION_SIZE,
+    DEFAULT_ALPHA, DEFAULT_CHECKPOINT_DIR, DEFAULT_OUTPUT_DIR
+)
 
 # Create a global solution cache
 solution_cache = {}
@@ -30,20 +34,20 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Interactive image approximation using SNES')
     parser.add_argument('--image', '-i', type=str, required=True,
                       help='Path to the image')
-    parser.add_argument('--rects', '-r', type=int, default=100,
-                      help='Number of rectangles')
-    parser.add_argument('--max-size', '-m', type=int, default=128,
-                      help='Maximum size for the image (larger images will be resized)')
-    parser.add_argument('--population', '-p', type=int, default=32,
-                      help='Population size')
-    parser.add_argument('--alpha', '-a', type=float, default=0.05,
-                      help='Learning rate')
+    parser.add_argument('--rects', '-r', type=int, default=DEFAULT_RECT_COUNT,
+                      help=f'Number of rectangles (default: {DEFAULT_RECT_COUNT})')
+    parser.add_argument('--max-size', '-m', type=int, default=DEFAULT_MAX_IMAGE_SIZE,
+                      help=f'Maximum size for the image (larger images will be resized) (default: {DEFAULT_MAX_IMAGE_SIZE})')
+    parser.add_argument('--population', '-p', type=int, default=DEFAULT_POPULATION_SIZE,
+                      help=f'Population size (default: {DEFAULT_POPULATION_SIZE})')
+    parser.add_argument('--alpha', '-a', type=float, default=DEFAULT_ALPHA,
+                      help=f'Learning rate (default: {DEFAULT_ALPHA})')
     parser.add_argument('--max-iterations', type=int, default=1000,
                       help='Maximum iterations')
-    parser.add_argument('--checkpoint-dir', type=str, default='examples/checkpoints',
-                      help='Directory for checkpoints')
-    parser.add_argument('--output-dir', '-d', type=str, default='examples/output',
-                      help='Directory to save output files')
+    parser.add_argument('--checkpoint-dir', type=str, default=DEFAULT_CHECKPOINT_DIR,
+                      help=f'Directory for checkpoints (default: {DEFAULT_CHECKPOINT_DIR})')
+    parser.add_argument('--output-dir', '-d', type=str, default=DEFAULT_OUTPUT_DIR,
+                      help=f'Directory to save output files (default: {DEFAULT_OUTPUT_DIR})')
     parser.add_argument('--load', type=str, default=None,
                       help='Load a previous checkpoint file')
     parser.add_argument('--seed', type=int, default=None,

@@ -6,12 +6,12 @@ with open("README.md", "r", encoding="utf-8") as fh:
 setup(
     name="pysnes",
     version="0.1.0",
-    author="Your Name",
-    author_email="your.email@example.com",
+    author="Antonio Lujano Luna",
+    author_email="a00lujano@gmail.com",
     description="Python implementation of Separable Natural Evolution Strategies",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/yourusername/pysnes",
+    url="https://github.com/AntonioLujanoLuna/pysnes",
     packages=find_packages(),
     classifiers=[
         "Programming Language :: Python :: 3",
