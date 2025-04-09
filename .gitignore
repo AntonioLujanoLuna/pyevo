@@ -77,6 +77,7 @@ venv.bak/
 # Output files
 examples/output/
 checkpoints/
+examples/checkpoints/
 *.png
 *.jpg
 *.gif

@@ -641,7 +641,9 @@ def main():
             
             # Save checkpoint if requested
             if args.checkpoint:
-                checkpoint_path = os.path.join(args.output_dir, args.checkpoint)
+                checkpoint_dir = os.path.join(args.output_dir, "checkpoints")
+                os.makedirs(checkpoint_dir, exist_ok=True)
+                checkpoint_path = os.path.join(checkpoint_dir, args.checkpoint)
                 optimizer.save_state(checkpoint_path)
         
         # Current solution to visualize

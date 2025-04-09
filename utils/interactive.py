@@ -42,6 +42,9 @@ class InteractiveOptimizer:
         self.max_iterations = max_iterations
         self.checkpoint_dir = checkpoint_dir
         
+        # Add visualization callback
+        self.visualization_callback = None
+        
         # Create checkpoint directory if it doesn't exist
         if checkpoint_dir:
             Path(checkpoint_dir).mkdir(parents=True, exist_ok=True)
@@ -141,6 +144,10 @@ class InteractiveOptimizer:
         self.fitness_history.append(self.best_fitness)
         self.sigma_history.append(float(self.optimizer.get_stats()["sigma_mean"]))
         
+        # Call visualization callback if provided
+        if self.visualization_callback:
+            self.visualization_callback(self.optimizer, self.current_iteration)
+            
         # Print progress every 10 iterations
         if self.current_iteration % 10 == 0:
             self._print_progress()

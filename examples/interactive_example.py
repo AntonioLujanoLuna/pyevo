@@ -28,7 +28,7 @@ def parse_args():
                       help='Maximum number of iterations')
     parser.add_argument('--alpha', type=float, default=0.1,
                       help='Initial learning rate')
-    parser.add_argument('--checkpoint-dir', type=str, default='checkpoints',
+    parser.add_argument('--checkpoint-dir', type=str, default='examples/checkpoints',
                       help='Directory for checkpoints')
     parser.add_argument('--load', type=str, default=None,
                       help='Load a previous checkpoint file')
