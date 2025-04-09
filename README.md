@@ -24,6 +24,11 @@ The "separable" aspect means each dimension is treated independently, which redu
 - Flexible API with sensible defaults
 - Comprehensive documentation and examples
 - Minimal dependencies (just NumPy)
+- Vectorized operations for efficient computation
+- Parallel processing support for fitness evaluation
+- Early stopping to avoid wasted computation
+- Checkpointing for long-running optimizations
+- Progress tracking and statistics
 
 ## Installation
 
@@ -61,12 +66,17 @@ for i in range(100):
     fitnesses = [objective(x) for x in solutions]
     
     # Update optimizer
-    optimizer.tell(fitnesses)
+    improvement = optimizer.tell(fitnesses)
     
     # Print progress
     if i % 10 == 0:
         best = optimizer.get_best_solution()
         print(f"Iteration {i}, Best fitness: {-np.sum(best**2):.6f}")
+        
+    # Early stopping if no improvement
+    if improvement < 1e-6:
+        print("Early stopping: no improvement")
+        break
 ```
 
 ## Examples
@@ -85,9 +95,12 @@ This repository includes examples demonstrating SNES in action:
    
    This example demonstrates approximating an image using rectangles evolved with SNES. The script includes:
    - Vectorized operations for efficient computation
+   - Parallel processing for fitness evaluation
    - Support for creating animated GIFs of the optimization process
    - Automatic output directory management
-   - Progress visualization (can be disabled with --no-display)
+   - Progress visualization with tqdm progress bar
+   - Early stopping to avoid wasted computation
+   - Checkpointing for long-running optimizations
    
    Additional options:
    - `--max-size`: Maximum size for the image (default: 128)
@@ -96,6 +109,65 @@ This repository includes examples demonstrating SNES in action:
    - `--alpha`: Learning rate (default: 0.05)
    - `--gif-frames`: Number of frames in the evolution GIF (default: 50)
    - `--gif-fps`: Frames per second in the GIF (default: 10)
+   - `--workers`: Number of worker processes for parallel fitness evaluation
+   - `--early-stop`: Early stopping tolerance (default: 1e-6)
+   - `--patience`: Number of epochs to wait before early stopping (default: 10)
+   - `--checkpoint`: Path to save optimizer checkpoint
+   - `--no-display`: Disable live progress visualization
+
+## Advanced Features
+
+### Parallel Processing
+
+For computationally intensive fitness functions, you can use parallel processing:
+
+```python
+from concurrent.futures import ProcessPoolExecutor
+import functools
+
+def parallel_fitness(solutions, objective_func, max_workers=None):
+    """Evaluate fitness of multiple solutions in parallel."""
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        return list(executor.map(objective_func, solutions))
+
+# In your optimization loop
+fitnesses = parallel_fitness(solutions, objective, max_workers=4)
+```
+
+### Early Stopping
+
+SNES supports early stopping to avoid wasted computation:
+
+```python
+# In your optimization loop
+improvement = optimizer.tell(fitnesses, tolerance=1e-6)
+if improvement < 1e-6:
+    print("Early stopping: no improvement")
+    break
+```
+
+### Checkpointing
+
+Save and load optimizer state for long-running optimizations:
+
+```python
+# Save state
+optimizer.save_state("checkpoint.npz")
+
+# Load state
+optimizer = SNES.load_state("checkpoint.npz")
+```
+
+### Statistics
+
+Get statistics about the current optimizer state:
+
+```python
+stats = optimizer.get_stats()
+print(f"Center mean: {stats['center_mean']:.6f}")
+print(f"Sigma mean: {stats['sigma_mean']:.6f}")
+print(f"Best fitness: {stats['best_fitness']:.6f}")
+```
 
 ## How SNES Works
 

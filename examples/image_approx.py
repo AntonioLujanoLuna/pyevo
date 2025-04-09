@@ -15,6 +15,9 @@ import sys
 import os
 import imageio
 from pathlib import Path
+from concurrent.futures import ProcessPoolExecutor
+import functools
+from tqdm import tqdm
 
 # Add parent directory to path to import the SNES module
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -25,13 +28,13 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Image approximation using SNES')
     parser.add_argument('--image', type=str, default=None,
                         help='Path to the image (required)')
-    parser.add_argument('--rects', type=int, default=500,
+    parser.add_argument('--rects', type=int, default=200,
                         help='Number of rectangles')
-    parser.add_argument('--max-size', type=int, default=256,
+    parser.add_argument('--max-size', type=int, default=128,
                         help='Maximum size for the image (larger images will be resized)')
-    parser.add_argument('--epochs', type=int, default=5000,
+    parser.add_argument('--epochs', type=int, default=1000,
                         help='Number of generations to evolve')
-    parser.add_argument('--population', type=int, default=50,
+    parser.add_argument('--population', type=int, default=32,
                         help='Population size')
     parser.add_argument('--alpha', type=float, default=0.05,
                         help='Learning rate')
@@ -45,10 +48,18 @@ def parse_args():
                         help='Path to save evolution GIF')
     parser.add_argument('--gif-frames', type=int, default=50,
                         help='Number of frames to include in the GIF')
-    parser.add_argument('--gif-fps', type=float, default=12,
+    parser.add_argument('--gif-fps', type=float, default=10,
                         help='Frames per second in the GIF')
     parser.add_argument('--no-display', action='store_true',
                         help='Do not display live progress')
+    parser.add_argument('--workers', type=int, default=None,
+                        help='Number of worker processes for parallel fitness evaluation')
+    parser.add_argument('--early-stop', type=float, default=1e-6,
+                        help='Early stopping tolerance')
+    parser.add_argument('--patience', type=int, default=10,
+                        help='Number of epochs to wait before early stopping')
+    parser.add_argument('--checkpoint', type=str, default=None,
+                        help='Path to save optimizer checkpoint')
     return parser.parse_args()
 
 def sigmoid(x):
@@ -142,6 +153,16 @@ def create_comparison_image(target_image, solution_image, epoch, max_epochs):
     
     return comparison
 
+def parallel_fitness(solutions, target_image, num_rects, param_count, width, height, max_workers=None):
+    """Evaluate fitness of multiple solutions in parallel."""
+    partial_fitness = functools.partial(
+        fitness, target_image=target_image, num_rects=num_rects, 
+        param_count=param_count, width=width, height=height
+    )
+    
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        return list(executor.map(partial_fitness, solutions))
+
 def main():
     """Run the image approximation example."""
     args = parse_args()
@@ -178,6 +199,8 @@ def main():
     print(f"Population size: {population_count}")
     print(f"Epochs: {max_epochs}")
     print(f"Learning rate (alpha): {alpha}")
+    if args.workers:
+        print(f"Using {args.workers} worker processes")
     
     # Load target image
     target_image = load_image(args.image, max_size=args.max_size)
@@ -233,29 +256,55 @@ def main():
     start_time = time.time()
     best_fitness = float('-inf')
     best_solution = None
+    stagnation_counter = 0
     
     # Pre-allocate fitness array
     fitnesses = np.zeros(population_count, dtype=np.float32)
     
-    for epoch in range(max_epochs):
+    # Create progress bar
+    pbar = tqdm(range(max_epochs), desc="Optimizing")
+    
+    for epoch in pbar:
         # Generate and evaluate solutions
         solutions = optimizer.ask()
         
-        # Vectorized fitness calculation
-        for i in range(population_count):
-            # Draw solution
-            img = draw_solution(solutions[i], width, height, num_rects, param_count)
-            # Calculate error (mean squared error)
-            fitnesses[i] = -np.mean((img.astype(np.float32) - target_image.astype(np.float32)) ** 2)
+        # Evaluate fitness (parallel if workers specified)
+        if args.workers:
+            fitnesses = parallel_fitness(
+                solutions, target_image, num_rects, param_count, 
+                width, height, max_workers=args.workers
+            )
+        else:
+            # Vectorized fitness calculation
+            for i in range(population_count):
+                # Draw solution
+                img = draw_solution(solutions[i], width, height, num_rects, param_count)
+                # Calculate error (mean squared error)
+                fitnesses[i] = -np.mean((img.astype(np.float32) - target_image.astype(np.float32)) ** 2)
         
-        # Update optimizer
-        optimizer.tell(fitnesses)
+        # Update optimizer and check for improvement
+        improvement = optimizer.tell(fitnesses, tolerance=args.early_stop)
+        
+        # Early stopping check
+        if improvement < args.early_stop:
+            stagnation_counter += 1
+        else:
+            stagnation_counter = 0
+            
+        if stagnation_counter >= args.patience:
+            print(f"\nEarly stopping at epoch {epoch}: no improvement for {args.patience} epochs")
+            break
         
         # Track best solution
         current_best_idx = np.argmax(fitnesses)
         if fitnesses[current_best_idx] > best_fitness:
             best_fitness = fitnesses[current_best_idx]
             best_solution = solutions[current_best_idx].copy()
+            
+            # Save checkpoint if requested
+            if args.checkpoint:
+                checkpoint_path = os.path.join(args.output_dir, args.checkpoint)
+                optimizer.save_state(checkpoint_path)
         
         # Current solution to visualize
         current_solution = optimizer.get_best_solution()
@@ -272,14 +321,22 @@ def main():
             plt.imshow(current_img)
             plt.title(f"Epoch {epoch}/{max_epochs}")
             plt.pause(0.01)
-            
-        # Print progress
-        if epoch % 50 == 0 or epoch == max_epochs - 1:
-            elapsed = time.time() - start_time
-            print(f"Epoch {epoch}/{max_epochs}: Error = {-best_fitness:.2f}, Time: {elapsed:.2f}s")
+        
+        # Update progress bar
+        pbar.set_postfix({
+            'error': f"{-best_fitness:.2f}",
+            'improvement': f"{improvement:.2e}"
+        })
     
     total_time = time.time() - start_time
     print(f"\nOptimization completed in {total_time:.2f} seconds")
+    
+    # Print final statistics
+    stats = optimizer.get_stats()
+    print("\nFinal optimizer statistics:")
+    for key, value in stats.items():
+        if value is not None:
+            print(f"{key}: {value:.6f}")
     
     # Use either the best found solution or the final center
     final_solution = best_solution if best_solution is not None else optimizer.get_best_solution()

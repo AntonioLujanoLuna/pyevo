@@ -114,12 +114,16 @@ class SNES:
             
         return self.solutions
     
-    def tell(self, fitnesses):
-        """Update parameters based on fitness values.
+    def tell(self, fitnesses, tolerance=1e-6):
+        """Update parameters based on fitness values (vectorized version).
         
         Args:
             fitnesses: Array or list of fitness values for each solution
-                       (higher values are better)
+                      (higher values are better)
+            tolerance: Minimum improvement threshold for early stopping
+            
+        Returns:
+            Improvement in best fitness (for early stopping)
         """
         if len(fitnesses) != self.population_count:
             raise ValueError("Mismatch between population size and fitness values")
@@ -127,24 +131,81 @@ class SNES:
         # Sort indices by fitness (descending order)
         indices = np.argsort(-np.array(fitnesses))
         
-        # Update parameters for each dimension
+        # Get utilities for each rank
+        utilities = self.utility_weights[np.arange(len(indices))]
+        
+        # Vectorized calculation of deltas
         for j in range(self.solution_length):
-            delta_mu = 0
-            delta_sigma = 0
+            noises = self.gaussians[indices, j]
+            delta_mu = np.sum(utilities * noises)
+            delta_sigma = np.sum(utilities * (noises**2 - 1))
             
-            # Sum utility-weighted noise for this dimension
-            for rank, idx in enumerate(indices):
-                utility = self.utility_weights[rank]
-                noise = self.gaussians[idx, j]
-                delta_mu += utility * noise
-                delta_sigma += utility * (noise*noise - 1)
-            
-            # Update center (mu)
+            # Update center and sigma
             self.center[j] += self.eta_center * self.sigma[j] * delta_mu
-            
-            # Update sigma: multiplicative update via exponential
             self.sigma[j] *= np.exp(0.5 * self.eta_sigma * delta_sigma)
+        
+        # Return improvement metric for early stopping
+        best_fitness = np.max(fitnesses)
+        if hasattr(self, 'previous_best'):
+            improvement = best_fitness - self.previous_best
+            self.previous_best = best_fitness
+            return improvement
+        else:
+            self.previous_best = best_fitness
+            return float('inf')
+    
+    def get_stats(self):
+        """Return current optimizer statistics.
+        
+        Returns:
+            Dictionary containing statistics about the current state
+        """
+        return {
+            "center_mean": float(np.mean(self.center)),
+            "center_min": float(np.min(self.center)),
+            "center_max": float(np.max(self.center)),
+            "sigma_mean": float(np.mean(self.sigma)),
+            "sigma_min": float(np.min(self.sigma)),
+            "sigma_max": float(np.max(self.sigma)),
+            "best_fitness": float(self.previous_best) if hasattr(self, 'previous_best') else None
+        }
+    
+    def save_state(self, filename):
+        """Save optimizer state to file.
+        
+        Args:
+            filename: Path to save the state
+        """
+        np.savez(
+            filename, 
+            center=self.center, 
+            sigma=self.sigma, 
+            solution_length=self.solution_length,
+            population_count=self.population_count,
+            previous_best=getattr(self, 'previous_best', None)
+        )
+    
+    @classmethod
+    def load_state(cls, filename):
+        """Load optimizer state from file.
+        
+        Args:
+            filename: Path to load the state from
             
+        Returns:
+            SNES instance with loaded state
+        """
+        data = np.load(filename)
+        optimizer = cls(
+            solution_length=int(data['solution_length']),
+            population_count=int(data['population_count']),
+            center=data['center'],
+            sigma=data['sigma']
+        )
+        if 'previous_best' in data and data['previous_best'] is not None:
+            optimizer.previous_best = float(data['previous_best'])
+        return optimizer
+    
     def get_best_solution(self):
         """Return current best estimate (center).
         
