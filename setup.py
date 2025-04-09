@@ -30,7 +30,6 @@ setup(
             "matplotlib>=3.3.0",
             "imageio>=2.9.0",
             "tqdm>=4.65.0",
-            "scipy>=1.10.0",
         ],
         "video": [
             "imageio[ffmpeg]",

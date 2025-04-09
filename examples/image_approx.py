@@ -20,8 +20,13 @@ import functools
 from tqdm import tqdm
 import hashlib
 
-# We'll implement SSIM directly instead of using scikit-image
-HAS_SSIM = True  # Always available with our custom implementation
+# Add parent directory to path to import the SNES module and utils
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from snes import SNES
+from utils.image_processing import calculate_ssim, convolve2d
+
+# We're using our own pure NumPy SSIM implementation
+HAS_SSIM = True
 
 # Try to import CuPy for GPU acceleration
 try:
@@ -31,10 +36,6 @@ try:
 except ImportError:
     HAS_CUPY = False
     print("CuPy not found - using NumPy only")
-
-# Add parent directory to path to import the SNES module
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from snes import SNES
 
 def parse_args():
     """
@@ -437,120 +438,6 @@ def parallel_fitness(solutions, target_image, num_rects, param_count, width, hei
     
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
         return list(executor.map(partial_fitness, solutions))
-
-def calculate_ssim(img1, img2, win_size=11, k1=0.01, k2=0.03, L=255, downsample=True):
-    """
-    Calculate Structural Similarity Index (SSIM) between two images.
-    Custom implementation using only NumPy, no external dependencies.
-    
-    Args:
-        img1 (numpy.ndarray): First image.
-        img2 (numpy.ndarray): Second image.
-        win_size (int): Size of the Gaussian window (default: 11).
-        k1 (float): First stability constant (default: 0.01).
-        k2 (float): Second stability constant (default: 0.03).
-        L (int): Dynamic range of pixel values (default: 255).
-        downsample (bool): Whether to downsample large images for faster processing.
-        
-    Returns:
-        float: SSIM value in range [0, 1], higher is better.
-    """
-    # Optional downsampling for faster processing on large images
-    if downsample and (img1.shape[0] > 256 or img1.shape[1] > 256):
-        factor = min(1, 256 / max(img1.shape[0], img1.shape[1]))
-        new_size = (int(img1.shape[1] * factor), int(img1.shape[0] * factor))
-        
-        # Use PIL for high-quality resizing
-        from PIL import Image
-        img1_pil = Image.fromarray(img1)
-        img2_pil = Image.fromarray(img2)
-        img1_small = np.array(img1_pil.resize(new_size, Image.LANCZOS))
-        img2_small = np.array(img2_pil.resize(new_size, Image.LANCZOS))
-        
-        return calculate_ssim(img1_small, img2_small, win_size, k1, k2, L, downsample=False)
-    
-    # Convert to grayscale if color
-    if img1.ndim == 3 and img1.shape[2] == 3:
-        # Simple grayscale conversion using weighted sum
-        img1_gray = np.dot(img1[..., :3], [0.2989, 0.5870, 0.1140]).astype(np.float32)
-        img2_gray = np.dot(img2[..., :3], [0.2989, 0.5870, 0.1140]).astype(np.float32)
-    else:
-        img1_gray = img1.astype(np.float32)
-        img2_gray = img2.astype(np.float32)
-    
-    # Constants for stabilizing division
-    c1 = (k1 * L) ** 2
-    c2 = (k2 * L) ** 2
-    
-    # Generate a Gaussian kernel for window
-    x = np.arange(-(win_size // 2), win_size // 2 + 1)
-    gauss = np.exp(-(x ** 2) / (2 * 1.5 ** 2))
-    gauss = gauss / np.sum(gauss)
-    window = np.outer(gauss, gauss)
-    
-    # Fast convolution using scipy if available, otherwise use numpy
-    try:
-        from scipy import ndimage
-        filter_func = ndimage.convolve
-    except ImportError:
-        # Fall back to a simplified convolution approach
-        filter_func = lambda img, window: simple_convolve(img, window)
-    
-    # Compute means
-    mu1 = filter_func(img1_gray, window)
-    mu2 = filter_func(img2_gray, window)
-    
-    # Compute variances and covariance
-    mu1_sq = mu1 * mu1
-    mu2_sq = mu2 * mu2
-    mu1_mu2 = mu1 * mu2
-    
-    sigma1_sq = filter_func(img1_gray * img1_gray, window) - mu1_sq
-    sigma2_sq = filter_func(img2_gray * img2_gray, window) - mu2_sq
-    sigma12 = filter_func(img1_gray * img2_gray, window) - mu1_mu2
-    
-    # Compute SSIM
-    numerator = (2 * mu1_mu2 + c1) * (2 * sigma12 + c2)
-    denominator = (mu1_sq + mu2_sq + c1) * (sigma1_sq + sigma2_sq + c2)
-    
-    # Avoid division by zero
-    ssim_map = np.where(denominator > 0, numerator / denominator, 0)
-    
-    # Return mean SSIM
-    return float(np.mean(ssim_map))
-
-def simple_convolve(img, window):
-    """
-    A simplified 2D convolution implementation using NumPy.
-    Works with any NumPy version.
-    
-    Args:
-        img (numpy.ndarray): Input image.
-        window (numpy.ndarray): 2D window/kernel.
-        
-    Returns:
-        numpy.ndarray: Convolved result.
-    """
-    # Get dimensions
-    m, n = window.shape
-    h, w = img.shape
-    
-    # Pad the image
-    pad_width = ((m//2, m//2), (n//2, n//2))
-    padded = np.pad(img, pad_width, mode='reflect')
-    
-    # Prepare output
-    result = np.zeros((h, w), dtype=np.float32)
-    
-    # Fast loop-based approach with vectorized operations within the loop
-    for i in range(h):
-        for j in range(w):
-            # Extract the neighborhood
-            neighborhood = padded[i:i+m, j:j+n]
-            # Apply the window
-            result[i, j] = np.sum(neighborhood * window)
-    
-    return result
 
 def save_animation(frames, output_path, fps=10, format='gif'):
     """
