@@ -18,6 +18,16 @@ from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor
 import functools
 from tqdm import tqdm
+import hashlib
+
+# Try to import CuPy for GPU acceleration
+try:
+    import cupy as cp
+    HAS_CUPY = True
+    print("CuPy found - GPU acceleration available")
+except ImportError:
+    HAS_CUPY = False
+    print("CuPy not found - using NumPy only")
 
 # Add parent directory to path to import the SNES module
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -60,6 +70,10 @@ def parse_args():
                         help='Number of epochs to wait before early stopping')
     parser.add_argument('--checkpoint', type=str, default=None,
                         help='Path to save optimizer checkpoint')
+    parser.add_argument('--use-gpu', action='store_true',
+                        help='Use GPU acceleration via CuPy if available')
+    parser.add_argument('--cache-size', type=int, default=1000,
+                        help='Size of solution cache for fitness evaluation')
     return parser.parse_args()
 
 def sigmoid(x):
@@ -87,14 +101,100 @@ def load_image(image_path, max_size=256):
     # Convert to numpy array
     return np.array(img)
 
-def draw_solution(solution, width, height, num_rects, param_count):
-    """Draw rectangles based on solution parameters."""
-    # Create a blank white image
-    img = Image.new('RGB', (width, height), color='white')
-    draw = ImageDraw.Draw(img)
+# Create a global solution cache
+solution_cache = {}
+
+def solution_hash(solution, num_rects, precision=3):
+    """Create a hash for a solution to use as cache key."""
+    # Round to reduce cache misses for very similar solutions
+    rounded = np.round(solution, precision)
+    return hashlib.md5(rounded.tobytes()).hexdigest()
+
+def draw_solution_batch(solution, width, height, num_rects, param_count, use_gpu=False):
+    """Draw rectangles in batches for better performance using NumPy/CuPy operations."""
+    # Choose the right array library based on GPU usage
+    xp = cp if use_gpu and HAS_CUPY else np
+    
+    # Create a blank RGBA image (using alpha channel for faster compositing)
+    img_array = xp.ones((height, width, 4), dtype=xp.uint8) * 255
+    img_array[:, :, 3] = 0  # Start with transparent image
     
     # Reshape solution into a 2D array for vectorized operations
-    solution_reshaped = solution.reshape(num_rects, param_count)
+    solution_reshaped = xp.asarray(solution.reshape(num_rects, param_count)) if use_gpu and HAS_CUPY else solution.reshape(num_rects, param_count)
+    
+    # Vectorized calculations
+    x = width / 2 + (solution_reshaped[:, 0] * width) / 2
+    y = height / 2 + (solution_reshaped[:, 1] * height) / 2
+    w = (softplus(solution_reshaped[:, 2]) * width) / 8
+    h = (softplus(solution_reshaped[:, 3]) * height) / 8
+    
+    # Vectorized colors with alpha channel
+    r = (sigmoid(solution_reshaped[:, 4]) * 255).astype(xp.uint8)
+    g = (sigmoid(solution_reshaped[:, 5]) * 255).astype(xp.uint8)
+    b = (sigmoid(solution_reshaped[:, 6]) * 255).astype(xp.uint8)
+    
+    # Process rectangles in batches for better memory efficiency
+    # Group similar-sized rectangles together
+    areas = w * h
+    size_indices = xp.argsort(areas)
+    
+    # Batch size based on rectangle count
+    batch_size = max(1, min(50, num_rects // 10))
+    
+    # Process in batches from small to large
+    for batch_start in range(0, num_rects, batch_size):
+        batch_end = min(batch_start + batch_size, num_rects)
+        batch_indices = size_indices[batch_start:batch_end]
+        
+        # Create a temporary buffer for this batch
+        batch_buffer = xp.zeros((height, width, 4), dtype=xp.uint8)
+        
+        # Draw each rectangle in this batch
+        for idx in batch_indices:
+            # Calculate rectangle coordinates
+            x1 = max(0, int(x[idx] - w[idx]/2))
+            y1 = max(0, int(y[idx] - h[idx]/2))
+            x2 = min(width, int(x[idx] + w[idx]/2))
+            y2 = min(height, int(y[idx] + h[idx]/2))
+            
+            # Skip rectangles that are too small
+            if x2 <= x1 or y2 <= y1:
+                continue
+            
+            # Assign color to the rectangle area (RGBA)
+            batch_buffer[y1:y2, x1:x2, 0] = r[idx]
+            batch_buffer[y1:y2, x1:x2, 1] = g[idx]
+            batch_buffer[y1:y2, x1:x2, 2] = b[idx]
+            batch_buffer[y1:y2, x1:x2, 3] = 255  # Fully opaque
+        
+        # Composite this batch with the main image
+        alpha = batch_buffer[:, :, 3:4] / 255.0
+        img_array[:, :, :3] = (1 - alpha) * img_array[:, :, :3] + alpha * batch_buffer[:, :, :3]
+        img_array[:, :, 3] = xp.maximum(img_array[:, :, 3], batch_buffer[:, :, 3])
+    
+    # Extract RGB channels for result
+    result = img_array[:, :, :3]
+    
+    # Convert back to NumPy array if using GPU
+    if use_gpu and HAS_CUPY:
+        result = cp.asnumpy(result)
+        
+    return result
+
+def draw_solution(solution, width, height, num_rects, param_count, use_gpu=False):
+    """Draw rectangles based on solution parameters using NumPy for better performance."""
+    # Use batch drawing method for larger rectangle counts
+    if num_rects > 50:
+        return draw_solution_batch(solution, width, height, num_rects, param_count, use_gpu)
+    
+    # Create a blank white image as NumPy array
+    if use_gpu and HAS_CUPY:
+        # Use CuPy for GPU acceleration
+        img_array = cp.ones((height, width, 3), dtype=cp.uint8) * 255
+        solution_reshaped = cp.asarray(solution.reshape(num_rects, param_count))
+    else:
+        img_array = np.ones((height, width, 3), dtype=np.uint8) * 255
+        solution_reshaped = solution.reshape(num_rects, param_count)
     
     # Vectorized calculations for positions
     x = width / 2 + (solution_reshaped[:, 0] * width) / 2
@@ -105,27 +205,74 @@ def draw_solution(solution, width, height, num_rects, param_count):
     h = (softplus(solution_reshaped[:, 3]) * height) / 8
     
     # Vectorized calculations for colors
-    r = (sigmoid(solution_reshaped[:, 4]) * 255).astype(np.uint8)
-    g = (sigmoid(solution_reshaped[:, 5]) * 255).astype(np.uint8)
-    b = (sigmoid(solution_reshaped[:, 6]) * 255).astype(np.uint8)
+    r = (sigmoid(solution_reshaped[:, 4]) * 255).astype(np.uint8 if not use_gpu or not HAS_CUPY else cp.uint8)
+    g = (sigmoid(solution_reshaped[:, 5]) * 255).astype(np.uint8 if not use_gpu or not HAS_CUPY else cp.uint8)
+    b = (sigmoid(solution_reshaped[:, 6]) * 255).astype(np.uint8 if not use_gpu or not HAS_CUPY else cp.uint8)
     
-    # Draw rectangles (still need loop for PIL)
-    for i in range(num_rects):
-        draw.rectangle(
-            [(x[i] - w[i]/2, y[i] - h[i]/2), (x[i] + w[i]/2, y[i] + h[i]/2)],
-            fill=(r[i], g[i], b[i])
-        )
+    # Sort rectangles by size (smaller rectangles on top for potentially fewer pixel operations)
+    areas = w * h
+    sort_indices = np.argsort(areas) if not use_gpu or not HAS_CUPY else cp.argsort(areas).get()
     
-    return np.array(img)
+    # Draw rectangles directly on the NumPy array
+    for idx in sort_indices:
+        # Calculate rectangle coordinates
+        x1 = max(0, int(x[idx] - w[idx]/2))
+        y1 = max(0, int(y[idx] - h[idx]/2))
+        x2 = min(width, int(x[idx] + w[idx]/2))
+        y2 = min(height, int(y[idx] + h[idx]/2))
+        
+        # Skip rectangles that are too small
+        if x2 <= x1 or y2 <= y1:
+            continue
+        
+        # Assign color to the rectangle area
+        img_array[y1:y2, x1:x2, 0] = r[idx]
+        img_array[y1:y2, x1:x2, 1] = g[idx]
+        img_array[y1:y2, x1:x2, 2] = b[idx]
+    
+    # Convert back to NumPy array if using GPU
+    if use_gpu and HAS_CUPY:
+        img_array = cp.asnumpy(img_array)
+        
+    return img_array
 
-def fitness(solution, target_image, num_rects, param_count, width, height):
+def fitness(solution, target_image, num_rects, param_count, width, height, use_gpu=False, use_cache=True):
     """Calculate negative squared error between solution image and target."""
-    # Draw solution
-    img = draw_solution(solution, width, height, num_rects, param_count)
+    # Check cache first if enabled
+    if use_cache:
+        solution_key = solution_hash(solution, num_rects)
+        if solution_key in solution_cache:
+            return solution_cache[solution_key]
     
-    # Calculate error (mean squared error) - already vectorized
-    error = np.mean((img.astype(np.float32) - target_image.astype(np.float32)) ** 2)
-    return -error
+    # Draw solution
+    img = draw_solution(solution, width, height, num_rects, param_count, use_gpu)
+    
+    # Calculate error (mean squared error) - use GPU if available
+    if use_gpu and HAS_CUPY:
+        # Handle case where target_image is already on GPU
+        if isinstance(target_image, cp.ndarray):
+            target_gpu = target_image
+        else:
+            target_gpu = cp.asarray(target_image)
+            
+        img_gpu = cp.asarray(img)
+        error = cp.mean((img_gpu.astype(cp.float32) - target_gpu.astype(cp.float32)) ** 2)
+        error = float(error.get())  # Convert back to CPU
+    else:
+        error = np.mean((img.astype(np.float32) - target_image.astype(np.float32)) ** 2)
+    
+    fitness_value = -error
+    
+    # Cache the result if enabled
+    if use_cache:
+        # Limit cache size
+        if len(solution_cache) >= 1000:  # Can be adjusted as needed
+            # Remove random entry (simple strategy for cache eviction)
+            key_to_remove = next(iter(solution_cache))
+            solution_cache.pop(key_to_remove)
+        solution_cache[solution_key] = fitness_value
+    
+    return fitness_value
 
 def create_comparison_image(target_image, solution_image, epoch, max_epochs):
     """Create a comparison image with target and solution side by side."""
@@ -153,12 +300,17 @@ def create_comparison_image(target_image, solution_image, epoch, max_epochs):
     
     return comparison
 
-def parallel_fitness(solutions, target_image, num_rects, param_count, width, height, max_workers=None):
+def parallel_fitness(solutions, target_image, num_rects, param_count, width, height, max_workers=None, use_gpu=False, use_cache=True):
     """Evaluate fitness of multiple solutions in parallel."""
     partial_fitness = functools.partial(
         fitness, target_image=target_image, num_rects=num_rects, 
-        param_count=param_count, width=width, height=height
+        param_count=param_count, width=width, height=height,
+        use_gpu=use_gpu, use_cache=use_cache
     )
+    
+    # If using GPU, it's often more efficient to process sequentially
+    if use_gpu and HAS_CUPY:
+        return [partial_fitness(solution) for solution in solutions]
     
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
         return list(executor.map(partial_fitness, solutions))
@@ -206,6 +358,12 @@ def main():
     target_image = load_image(args.image, max_size=args.max_size)
     height, width = target_image.shape[:2]
     
+    # Convert target image to GPU if using GPU
+    if args.use_gpu and HAS_CUPY:
+        target_image_gpu = cp.asarray(target_image)
+    else:
+        target_image_gpu = None
+    
     print(f"Image dimensions after resizing: {width}x{height}")
     
     # Initialize center and sigma
@@ -252,6 +410,15 @@ def main():
         gif_frames = []
         print(f"Will create GIF with {frames_to_capture} frames")
     
+    # Validate GPU usage
+    use_gpu = args.use_gpu and HAS_CUPY
+    if args.use_gpu and not HAS_CUPY:
+        print("Warning: CuPy not available, falling back to CPU")
+    
+    # Configure solution cache
+    global solution_cache
+    solution_cache = {}  # Reset cache
+    
     # Run optimization
     start_time = time.time()
     best_fitness = float('-inf')
@@ -271,16 +438,23 @@ def main():
         # Evaluate fitness (parallel if workers specified)
         if args.workers:
             fitnesses = parallel_fitness(
-                solutions, target_image, num_rects, param_count, 
-                width, height, max_workers=args.workers
+                solutions, target_image_gpu if args.use_gpu and HAS_CUPY else target_image, 
+                num_rects, param_count, width, height, max_workers=args.workers,
+                use_gpu=use_gpu, use_cache=args.cache_size > 0
             )
         else:
-            # Vectorized fitness calculation
+            # Vectorized fitness calculation in batches for better memory usage
+            fitnesses = np.zeros(population_count, dtype=np.float32)
+            
+            # Process solutions
             for i in range(population_count):
-                # Draw solution
-                img = draw_solution(solutions[i], width, height, num_rects, param_count)
-                # Calculate error (mean squared error)
-                fitnesses[i] = -np.mean((img.astype(np.float32) - target_image.astype(np.float32)) ** 2)
+                # Calculate fitness with optional GPU acceleration and caching
+                fitnesses[i] = fitness(
+                    solutions[i], 
+                    target_image_gpu if args.use_gpu and HAS_CUPY else target_image,
+                    num_rects, param_count, width, height, 
+                    use_gpu=use_gpu, use_cache=args.cache_size > 0
+                )
         
         # Update optimizer and check for improvement
         improvement = optimizer.tell(fitnesses, tolerance=args.early_stop)
@@ -327,6 +501,12 @@ def main():
             'error': f"{-best_fitness:.2f}",
             'improvement': f"{improvement:.2e}"
         })
+        
+        # Clear cache periodically to prevent memory issues
+        if args.cache_size > 0 and epoch % 10 == 0:
+            # Keep only best solutions in cache
+            if len(solution_cache) > args.cache_size:
+                solution_cache.clear()
     
     total_time = time.time() - start_time
     print(f"\nOptimization completed in {total_time:.2f} seconds")
