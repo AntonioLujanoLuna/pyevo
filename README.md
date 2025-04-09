@@ -134,6 +134,54 @@ def parallel_fitness(solutions, objective_func, max_workers=None):
 fitnesses = parallel_fitness(solutions, objective, max_workers=4)
 ```
 
+### Interactive Mode
+
+PySNES provides an interactive mode that allows you to control optimization runs in real-time:
+
+```python
+from pysnes import SNES
+from utils.interactive import InteractiveOptimizer
+
+# Define your objective function
+def objective(x):
+    return -np.sum(x**2)  # Negative because SNES maximizes
+
+# Create SNES optimizer
+optimizer = SNES(solution_length=20)
+
+# Create interactive optimizer wrapper
+interactive = InteractiveOptimizer(
+    optimizer=optimizer,
+    fitness_function=objective,
+    max_iterations=1000,
+    checkpoint_dir="checkpoints"
+)
+
+# Start interactive optimization
+best_solution, best_fitness = interactive.start()
+```
+
+During optimization, you can enter any of these commands in the terminal:
+- `pause` - Pause the optimization
+- `resume` - Resume the optimization
+- `stop` - Stop the optimization
+- `stats` - Show detailed statistics
+- `save` - Save a checkpoint of the current state
+- `alpha <value>` - Adjust the learning rate multiplier
+- `params` - Show current optimizer parameters
+- `help` - Show all available commands
+
+You can also run a full example:
+```bash
+python examples/interactive_example.py --dimensions 50 --max-iterations 2000
+```
+
+The interactive mode is particularly useful for:
+- Long-running optimizations that may need adjustment
+- Experimenting with different learning rates
+- Saving intermediate results
+- Monitoring progress in real-time
+
 ### Early Stopping
 
 SNES supports early stopping to avoid wasted computation:
@@ -149,55 +197,3 @@ if improvement < 1e-6:
 ### Checkpointing
 
 Save and load optimizer state for long-running optimizations:
-
-```python
-# Save state
-optimizer.save_state("checkpoint.npz")
-
-# Load state
-optimizer = SNES.load_state("checkpoint.npz")
-```
-
-### Statistics
-
-Get statistics about the current optimizer state:
-
-```python
-stats = optimizer.get_stats()
-print(f"Center mean: {stats['center_mean']:.6f}")
-print(f"Sigma mean: {stats['sigma_mean']:.6f}")
-print(f"Best fitness: {stats['best_fitness']:.6f}")
-```
-
-## How SNES Works
-
-SNES maintains a probabilistic model of where good solutions are likely to be found in the search space. The model consists of:
-
-- A mean vector μ that represents the current best estimate of the optimal solution
-- A standard deviation vector σ that controls the exploration rate in each dimension
-
-In each iteration:
-
-1. Sample a population of solutions around μ using the normal distribution N(μ, σ²)
-2. Evaluate the fitness of each solution
-3. Rank solutions by fitness (not absolute values)
-4. Calculate utility weights based on ranks (better solutions get higher weights)
-5. Update μ by moving toward better solutions (weighted by utility)
-6. Update σ by increasing/decreasing exploration based on solution utility
-
-This process adapts the search distribution to focus on promising regions while maintaining appropriate exploration.
-
-## SNES vs. Other Optimization Methods
-
-- **Compared to gradient descent**: No need for gradients, better at escaping local optima
-- **Compared to CMA-ES**: More efficient for high-dimensional problems but less powerful for correlated parameters
-- **Compared to genetic algorithms**: More sample-efficient, with principled adaptation of the search distribution
-
-## References
-
-1. Wierstra, D., Schaul, T., Glasmachers, T., Sun, Y., Peters, J., & Schmidhuber, J. (2014). "Natural Evolution Strategies." Journal of Machine Learning Research, 15(1), 949-980.
-2. Schaul, T., Glasmachers, T., & Schmidhuber, J. (2011). "High dimensions and heavy tails for natural evolution strategies." In Proceedings of the 13th annual conference on Genetic and evolutionary computation (pp. 845-852).
-
-## License
-
-MIT License - See LICENSE file for details.
