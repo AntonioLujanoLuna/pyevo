@@ -1,8 +1,13 @@
+# Core dependencies
 numpy>=1.19.0
 pillow>=8.0.0
 matplotlib>=3.3.0
 imageio>=2.9.0
 tqdm>=4.65.0
+scipy>=1.10.0
 
-# Optional GPU acceleration - uncomment to enable
+# Optional dependencies - MP4 output
+# imageio[ffmpeg]
+
+# Optional dependencies - GPU acceleration (uncomment to enable)
 # cupy>=12.0.0

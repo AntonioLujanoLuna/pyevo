@@ -20,6 +20,9 @@ import functools
 from tqdm import tqdm
 import hashlib
 
+# We'll implement SSIM directly instead of using scikit-image
+HAS_SSIM = True  # Always available with our custom implementation
+
 # Try to import CuPy for GPU acceleration
 try:
     import cupy as cp
@@ -34,58 +37,96 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from snes import SNES
 
 def parse_args():
-    """Parse command line arguments."""
+    """
+    Parse command line arguments.
+    
+    Returns:
+        argparse.Namespace: The parsed command line arguments.
+    """
     parser = argparse.ArgumentParser(description='Image approximation using SNES')
-    parser.add_argument('--image', type=str, default=None,
+    parser.add_argument('--image', '-i', type=str, default=None,
                         help='Path to the image (required)')
-    parser.add_argument('--rects', type=int, default=200,
+    parser.add_argument('--rects', '-r', type=int, default=200,
                         help='Number of rectangles')
-    parser.add_argument('--max-size', type=int, default=128,
+    parser.add_argument('--max-size', '-m', type=int, default=128,
                         help='Maximum size for the image (larger images will be resized)')
-    parser.add_argument('--epochs', type=int, default=1000,
+    parser.add_argument('--epochs', '-e', type=int, default=1000,
                         help='Number of generations to evolve')
-    parser.add_argument('--population', type=int, default=32,
+    parser.add_argument('--population', '-p', type=int, default=32,
                         help='Population size')
-    parser.add_argument('--alpha', type=float, default=0.05,
+    parser.add_argument('--alpha', '-a', type=float, default=0.05,
                         help='Learning rate')
-    parser.add_argument('--seed', type=int, default=None,
+    parser.add_argument('--seed', '-s', type=int, default=None,
                         help='Random seed')
-    parser.add_argument('--output', type=str, default=None,
+    parser.add_argument('--output', '-o', type=str, default=None,
                         help='Path to save the final image')
-    parser.add_argument('--output-dir', type=str, default='output',
+    parser.add_argument('--output-dir', '-d', type=str, default='output',
                         help='Directory to save output files (default: output)')
-    parser.add_argument('--gif', type=str, default=None,
+    parser.add_argument('--gif', '-g', type=str, default=None,
                         help='Path to save evolution GIF')
+    parser.add_argument('--mp4', '-v', type=str, default=None,
+                        help='Path to save evolution as MP4 video')
     parser.add_argument('--gif-frames', type=int, default=50,
-                        help='Number of frames to include in the GIF')
+                        help='Number of frames to include in the animation')
     parser.add_argument('--gif-fps', type=float, default=10,
-                        help='Frames per second in the GIF')
+                        help='Frames per second in the animation')
     parser.add_argument('--no-display', action='store_true',
                         help='Do not display live progress')
-    parser.add_argument('--workers', type=int, default=None,
+    parser.add_argument('--workers', '-w', type=int, default=None,
                         help='Number of worker processes for parallel fitness evaluation')
     parser.add_argument('--early-stop', type=float, default=1e-6,
                         help='Early stopping tolerance')
     parser.add_argument('--patience', type=int, default=10,
                         help='Number of epochs to wait before early stopping')
-    parser.add_argument('--checkpoint', type=str, default=None,
+    parser.add_argument('--checkpoint', '-c', type=str, default=None,
                         help='Path to save optimizer checkpoint')
-    parser.add_argument('--use-gpu', action='store_true',
+    parser.add_argument('--use-gpu', '-gpu', action='store_true',
                         help='Use GPU acceleration via CuPy if available')
     parser.add_argument('--cache-size', type=int, default=1000,
                         help='Size of solution cache for fitness evaluation')
+    parser.add_argument('--quality-metrics', '-q', action='store_true',
+                        help='Calculate and display additional quality metrics (SSIM)')
     return parser.parse_args()
 
 def sigmoid(x):
-    """Sigmoid activation function."""
+    """
+    Sigmoid activation function.
+    
+    Args:
+        x (array-like): Input values.
+        
+    Returns:
+        array-like: Output values in range (0, 1).
+    """
     return 1.0 / (1.0 + np.exp(-x))
 
 def softplus(x):
-    """Softplus activation function."""
+    """
+    Softplus activation function.
+    
+    Args:
+        x (array-like): Input values.
+        
+    Returns:
+        array-like: Smoothed positive values.
+    """
     return np.log(1.0 + np.exp(x))
 
 def load_image(image_path, max_size=256):
-    """Load and resize an image."""
+    """
+    Load and resize an image.
+    
+    Args:
+        image_path (str): Path to the image file.
+        max_size (int, optional): Maximum dimension (width or height) for the image.
+            Larger images will be resized while preserving aspect ratio.
+            
+    Returns:
+        numpy.ndarray: Image as a NumPy array.
+        
+    Raises:
+        SystemExit: If the image cannot be loaded.
+    """
     try:
         img = Image.open(image_path)
     except Exception as e:
@@ -105,13 +146,40 @@ def load_image(image_path, max_size=256):
 solution_cache = {}
 
 def solution_hash(solution, num_rects, precision=3):
-    """Create a hash for a solution to use as cache key."""
+    """
+    Create a hash for a solution to use as cache key.
+    
+    Args:
+        solution (numpy.ndarray): Solution parameters.
+        num_rects (int): Number of rectangles in the solution.
+        precision (int, optional): Decimal precision for rounding to reduce
+            cache misses for very similar solutions.
+            
+    Returns:
+        str: MD5 hash of the rounded solution as a hexadecimal string.
+    """
     # Round to reduce cache misses for very similar solutions
     rounded = np.round(solution, precision)
     return hashlib.md5(rounded.tobytes()).hexdigest()
 
 def draw_solution_batch(solution, width, height, num_rects, param_count, use_gpu=False):
-    """Draw rectangles in batches for better performance using NumPy/CuPy operations."""
+    """
+    Draw rectangles in batches for better performance using NumPy/CuPy operations.
+    
+    This method is optimized for larger numbers of rectangles by using
+    batch processing and alpha compositing.
+    
+    Args:
+        solution (numpy.ndarray): Solution parameters.
+        width (int): Image width.
+        height (int): Image height.
+        num_rects (int): Number of rectangles to draw.
+        param_count (int): Number of parameters per rectangle.
+        use_gpu (bool, optional): Whether to use GPU acceleration via CuPy.
+        
+    Returns:
+        numpy.ndarray: RGB image as a NumPy array.
+    """
     # Choose the right array library based on GPU usage
     xp = cp if use_gpu and HAS_CUPY else np
     
@@ -182,7 +250,20 @@ def draw_solution_batch(solution, width, height, num_rects, param_count, use_gpu
     return result
 
 def draw_solution(solution, width, height, num_rects, param_count, use_gpu=False):
-    """Draw rectangles based on solution parameters using NumPy for better performance."""
+    """
+    Draw rectangles based on solution parameters using NumPy for better performance.
+    
+    Args:
+        solution (numpy.ndarray): Solution parameters.
+        width (int): Image width.
+        height (int): Image height.
+        num_rects (int): Number of rectangles to draw.
+        param_count (int): Number of parameters per rectangle.
+        use_gpu (bool, optional): Whether to use GPU acceleration via CuPy.
+        
+    Returns:
+        numpy.ndarray: RGB image as a NumPy array.
+    """
     # Use batch drawing method for larger rectangle counts
     if num_rects > 50:
         return draw_solution_batch(solution, width, height, num_rects, param_count, use_gpu)
@@ -237,7 +318,22 @@ def draw_solution(solution, width, height, num_rects, param_count, use_gpu=False
     return img_array
 
 def fitness(solution, target_image, num_rects, param_count, width, height, use_gpu=False, use_cache=True):
-    """Calculate negative squared error between solution image and target."""
+    """
+    Calculate negative squared error between solution image and target.
+    
+    Args:
+        solution (numpy.ndarray): Solution parameters.
+        target_image (numpy.ndarray): Target image to match.
+        num_rects (int): Number of rectangles in the solution.
+        param_count (int): Number of parameters per rectangle.
+        width (int): Image width.
+        height (int): Image height.
+        use_gpu (bool, optional): Whether to use GPU acceleration via CuPy.
+        use_cache (bool, optional): Whether to use solution caching.
+        
+    Returns:
+        float: Negative MSE (higher is better).
+    """
     # Check cache first if enabled
     if use_cache:
         solution_key = solution_hash(solution, num_rects)
@@ -275,7 +371,18 @@ def fitness(solution, target_image, num_rects, param_count, width, height, use_g
     return fitness_value
 
 def create_comparison_image(target_image, solution_image, epoch, max_epochs):
-    """Create a comparison image with target and solution side by side."""
+    """
+    Create a comparison image with target and solution side by side.
+    
+    Args:
+        target_image (numpy.ndarray): Target image.
+        solution_image (numpy.ndarray): Current solution image.
+        epoch (int): Current epoch number.
+        max_epochs (int): Maximum number of epochs.
+        
+    Returns:
+        numpy.ndarray: Comparison image as a NumPy array.
+    """
     # Create a figure with two subplots
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
     
@@ -301,7 +408,23 @@ def create_comparison_image(target_image, solution_image, epoch, max_epochs):
     return comparison
 
 def parallel_fitness(solutions, target_image, num_rects, param_count, width, height, max_workers=None, use_gpu=False, use_cache=True):
-    """Evaluate fitness of multiple solutions in parallel."""
+    """
+    Evaluate fitness of multiple solutions in parallel.
+    
+    Args:
+        solutions (list): List of solutions to evaluate.
+        target_image (numpy.ndarray): Target image to match.
+        num_rects (int): Number of rectangles in the solution.
+        param_count (int): Number of parameters per rectangle.
+        width (int): Image width.
+        height (int): Image height.
+        max_workers (int, optional): Maximum number of worker processes.
+        use_gpu (bool, optional): Whether to use GPU acceleration via CuPy.
+        use_cache (bool, optional): Whether to use solution caching.
+        
+    Returns:
+        list: List of fitness values for each solution.
+    """
     partial_fitness = functools.partial(
         fitness, target_image=target_image, num_rects=num_rects, 
         param_count=param_count, width=width, height=height,
@@ -315,8 +438,162 @@ def parallel_fitness(solutions, target_image, num_rects, param_count, width, hei
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
         return list(executor.map(partial_fitness, solutions))
 
+def calculate_ssim(img1, img2, win_size=11, k1=0.01, k2=0.03, L=255, downsample=True):
+    """
+    Calculate Structural Similarity Index (SSIM) between two images.
+    Custom implementation using only NumPy, no external dependencies.
+    
+    Args:
+        img1 (numpy.ndarray): First image.
+        img2 (numpy.ndarray): Second image.
+        win_size (int): Size of the Gaussian window (default: 11).
+        k1 (float): First stability constant (default: 0.01).
+        k2 (float): Second stability constant (default: 0.03).
+        L (int): Dynamic range of pixel values (default: 255).
+        downsample (bool): Whether to downsample large images for faster processing.
+        
+    Returns:
+        float: SSIM value in range [0, 1], higher is better.
+    """
+    # Optional downsampling for faster processing on large images
+    if downsample and (img1.shape[0] > 256 or img1.shape[1] > 256):
+        factor = min(1, 256 / max(img1.shape[0], img1.shape[1]))
+        new_size = (int(img1.shape[1] * factor), int(img1.shape[0] * factor))
+        
+        # Use PIL for high-quality resizing
+        from PIL import Image
+        img1_pil = Image.fromarray(img1)
+        img2_pil = Image.fromarray(img2)
+        img1_small = np.array(img1_pil.resize(new_size, Image.LANCZOS))
+        img2_small = np.array(img2_pil.resize(new_size, Image.LANCZOS))
+        
+        return calculate_ssim(img1_small, img2_small, win_size, k1, k2, L, downsample=False)
+    
+    # Convert to grayscale if color
+    if img1.ndim == 3 and img1.shape[2] == 3:
+        # Simple grayscale conversion using weighted sum
+        img1_gray = np.dot(img1[..., :3], [0.2989, 0.5870, 0.1140]).astype(np.float32)
+        img2_gray = np.dot(img2[..., :3], [0.2989, 0.5870, 0.1140]).astype(np.float32)
+    else:
+        img1_gray = img1.astype(np.float32)
+        img2_gray = img2.astype(np.float32)
+    
+    # Constants for stabilizing division
+    c1 = (k1 * L) ** 2
+    c2 = (k2 * L) ** 2
+    
+    # Generate a Gaussian kernel for window
+    x = np.arange(-(win_size // 2), win_size // 2 + 1)
+    gauss = np.exp(-(x ** 2) / (2 * 1.5 ** 2))
+    gauss = gauss / np.sum(gauss)
+    window = np.outer(gauss, gauss)
+    
+    # Fast convolution using scipy if available, otherwise use numpy
+    try:
+        from scipy import ndimage
+        filter_func = ndimage.convolve
+    except ImportError:
+        # Fall back to a simplified convolution approach
+        filter_func = lambda img, window: simple_convolve(img, window)
+    
+    # Compute means
+    mu1 = filter_func(img1_gray, window)
+    mu2 = filter_func(img2_gray, window)
+    
+    # Compute variances and covariance
+    mu1_sq = mu1 * mu1
+    mu2_sq = mu2 * mu2
+    mu1_mu2 = mu1 * mu2
+    
+    sigma1_sq = filter_func(img1_gray * img1_gray, window) - mu1_sq
+    sigma2_sq = filter_func(img2_gray * img2_gray, window) - mu2_sq
+    sigma12 = filter_func(img1_gray * img2_gray, window) - mu1_mu2
+    
+    # Compute SSIM
+    numerator = (2 * mu1_mu2 + c1) * (2 * sigma12 + c2)
+    denominator = (mu1_sq + mu2_sq + c1) * (sigma1_sq + sigma2_sq + c2)
+    
+    # Avoid division by zero
+    ssim_map = np.where(denominator > 0, numerator / denominator, 0)
+    
+    # Return mean SSIM
+    return float(np.mean(ssim_map))
+
+def simple_convolve(img, window):
+    """
+    A simplified 2D convolution implementation using NumPy.
+    Works with any NumPy version.
+    
+    Args:
+        img (numpy.ndarray): Input image.
+        window (numpy.ndarray): 2D window/kernel.
+        
+    Returns:
+        numpy.ndarray: Convolved result.
+    """
+    # Get dimensions
+    m, n = window.shape
+    h, w = img.shape
+    
+    # Pad the image
+    pad_width = ((m//2, m//2), (n//2, n//2))
+    padded = np.pad(img, pad_width, mode='reflect')
+    
+    # Prepare output
+    result = np.zeros((h, w), dtype=np.float32)
+    
+    # Fast loop-based approach with vectorized operations within the loop
+    for i in range(h):
+        for j in range(w):
+            # Extract the neighborhood
+            neighborhood = padded[i:i+m, j:j+n]
+            # Apply the window
+            result[i, j] = np.sum(neighborhood * window)
+    
+    return result
+
+def save_animation(frames, output_path, fps=10, format='gif'):
+    """
+    Save animation frames as GIF or MP4.
+    
+    Args:
+        frames (list): List of frames (numpy arrays).
+        output_path (str): Path to save the animation.
+        fps (float): Frames per second.
+        format (str): Animation format ('gif' or 'mp4').
+        
+    Returns:
+        bool: True if successful, False otherwise.
+    """
+    try:
+        # Ensure output directory exists
+        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+        
+        # Convert frames to 8-bit if needed
+        frames_8bit = [frame.astype(np.uint8) for frame in frames]
+        
+        if format.lower() == 'gif':
+            # Save GIF
+            imageio.mimsave(output_path, frames_8bit, fps=fps)
+            print(f"Animation saved as GIF: {output_path}")
+        elif format.lower() == 'mp4':
+            # Save MP4 - requires imageio[ffmpeg]
+            imageio.mimwrite(output_path, frames_8bit, fps=fps, quality=8)
+            print(f"Animation saved as MP4: {output_path}")
+        else:
+            print(f"Unsupported animation format: {format}")
+            return False
+        return True
+    except Exception as e:
+        print(f"Error saving animation: {e}")
+        return False
+
 def main():
-    """Run the image approximation example."""
+    """
+    Run the image approximation example.
+    
+    This is the main function that coordinates the evolutionary image approximation process.
+    """
     args = parse_args()
     
     if args.image is None:
@@ -332,8 +609,8 @@ def main():
         base_name = os.path.splitext(os.path.basename(args.image))[0]
         args.output = os.path.join(args.output_dir, f"{base_name}_approximated.jpg")
     
-    if args.gif is None:
-        # Extract base name from input image
+    if args.gif is None and args.mp4 is None:
+        # Set default animation output path
         base_name = os.path.splitext(os.path.basename(args.image))[0]
         args.gif = os.path.join(args.output_dir, f"{base_name}_evolution.gif")
     
@@ -393,9 +670,9 @@ def main():
         plt.figure(figsize=(6, 6))
         plt.ion()  # Interactive mode
     
-    # Setup for GIF creation
-    creating_gif = args.gif is not None
-    if creating_gif:
+    # Setup for animation creation
+    creating_animation = args.gif is not None or args.mp4 is not None
+    if creating_animation:
         # Calculate at which epochs we should capture frames
         frames_to_capture = args.gif_frames
         if frames_to_capture >= max_epochs:
@@ -407,8 +684,8 @@ def main():
             capture_frequency = max(1, max_epochs // frames_to_capture)
         
         # Initialize list to store frames
-        gif_frames = []
-        print(f"Will create GIF with {frames_to_capture} frames")
+        animation_frames = []
+        print(f"Will create animation with {frames_to_capture} frames")
     
     # Validate GPU usage
     use_gpu = args.use_gpu and HAS_CUPY
@@ -482,12 +759,12 @@ def main():
         
         # Current solution to visualize
         current_solution = optimizer.get_best_solution()
-        current_img = draw_solution(current_solution, width, height, num_rects, param_count)
+        current_img = draw_solution(current_solution, width, height, num_rects, param_count, use_gpu)
         
-        # Capture frame for GIF if needed
-        if creating_gif and (epoch % capture_frequency == 0 or epoch == max_epochs - 1):
+        # Capture frame for animation if needed
+        if creating_animation and (epoch % capture_frequency == 0 or epoch == max_epochs - 1):
             comparison = create_comparison_image(target_image, current_img, epoch, max_epochs)
-            gif_frames.append(comparison)
+            animation_frames.append(comparison)
         
         # Visualize progress periodically
         if (epoch % 50 == 0 or epoch == max_epochs - 1) and not args.no_display:
@@ -520,7 +797,7 @@ def main():
     
     # Use either the best found solution or the final center
     final_solution = best_solution if best_solution is not None else optimizer.get_best_solution()
-    final_img = draw_solution(final_solution, width, height, num_rects, param_count)
+    final_img = draw_solution(final_solution, width, height, num_rects, param_count, use_gpu)
     
     # Display final result
     if not args.no_display:
@@ -553,23 +830,42 @@ def main():
         Image.fromarray(final_img.astype(np.uint8)).save(output_path)
         print(f"Final image saved to: {output_path}")
     
-    # Save GIF if requested
-    if creating_gif and gif_frames:
+    # Save animation if requested
+    if creating_animation and animation_frames:
         # Convert frames to 8-bit
-        gif_frames = [frame.astype(np.uint8) for frame in gif_frames]
+        animation_frames_8bit = [frame.astype(np.uint8) for frame in animation_frames]
         
-        # Ensure the gif path is in the output directory
-        if not os.path.isabs(args.gif):
-            gif_path = os.path.join(args.output_dir, args.gif)
-        else:
-            gif_path = args.gif
+        if args.gif:
+            # Ensure the gif path is in the output directory
+            if not os.path.isabs(args.gif):
+                gif_path = os.path.join(args.output_dir, args.gif)
+            else:
+                gif_path = args.gif
+                
+            # Make sure directory exists
+            os.makedirs(os.path.dirname(os.path.abspath(gif_path)), exist_ok=True)
             
-        # Make sure directory exists
-        os.makedirs(os.path.dirname(os.path.abspath(gif_path)), exist_ok=True)
+            # Save GIF
+            imageio.mimsave(gif_path, animation_frames_8bit, fps=args.gif_fps)
+            print(f"Evolution GIF saved to: {gif_path}")
         
-        # Save GIF
-        imageio.mimsave(gif_path, gif_frames, fps=args.gif_fps)
-        print(f"Evolution GIF saved to: {gif_path}")
+        if args.mp4:
+            # Ensure the mp4 path is in the output directory
+            if not os.path.isabs(args.mp4):
+                mp4_path = os.path.join(args.output_dir, args.mp4)
+            else:
+                mp4_path = args.mp4
+                
+            # Make sure directory exists
+            os.makedirs(os.path.dirname(os.path.abspath(mp4_path)), exist_ok=True)
+            
+            try:
+                # Save MP4 video
+                imageio.mimwrite(mp4_path, animation_frames_8bit, fps=args.gif_fps, quality=8)
+                print(f"Evolution MP4 saved to: {mp4_path}")
+            except Exception as e:
+                print(f"Error saving MP4 (may need to install ffmpeg): {e}")
+                print("Try: pip install 'imageio[ffmpeg]'")
     
     # Print final error metrics
     final_error = np.mean((final_img.astype(np.float32) - target_image.astype(np.float32)) ** 2)
@@ -579,6 +875,12 @@ def main():
     if final_error > 0:
         psnr = 10 * np.log10((255 ** 2) / final_error)
         print(f"PSNR: {psnr:.2f} dB")
+    
+    # Calculate SSIM if requested and available
+    if args.quality_metrics and HAS_SSIM:
+        ssim_value = calculate_ssim(final_img, target_image)
+        if ssim_value is not None:
+            print(f"SSIM: {ssim_value:.4f}")
 
 if __name__ == "__main__":
     main()

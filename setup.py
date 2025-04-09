@@ -24,4 +24,26 @@ setup(
     install_requires=[
         "numpy>=1.19.0",
     ],
+    extras_require={
+        "examples": [
+            "pillow>=8.0.0",
+            "matplotlib>=3.3.0",
+            "imageio>=2.9.0",
+            "tqdm>=4.65.0",
+            "scipy>=1.10.0",
+        ],
+        "video": [
+            "imageio[ffmpeg]",
+        ],
+        "gpu": [
+            "cupy>=12.0.0",
+        ],
+        "all": [
+            "pillow>=8.0.0",
+            "matplotlib>=3.3.0",
+            "imageio>=2.9.0",
+            "tqdm>=4.65.0",
+            "imageio[ffmpeg]",
+        ],
+    },
 )
