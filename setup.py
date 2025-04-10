@@ -37,6 +37,24 @@ setup(
         "gpu": [
             "cupy-cuda12x>=12.0.0",
         ],
+        "image": [
+            "scipy>=1.7.0",
+            "scikit-image>=0.18.0",
+        ],
+        "test": [
+            "pytest>=6.0.0",
+            "pytest-cov>=2.10.0",
+        ],
+        "docs": [
+            "sphinx>=4.0.0",
+            "sphinx-rtd-theme>=0.5.0",
+        ],
+        "dev": [
+            "black>=21.5b2",
+            "isort>=5.9.1",
+            "flake8>=3.9.2",
+            "mypy>=0.812",
+        ],
         "all": [
             "pillow>=8.0.0",
             "matplotlib>=3.3.0",
@@ -44,6 +62,12 @@ setup(
             "tqdm>=4.65.0",
             "imageio[ffmpeg]",
             "cupy>=12.0.0",
+            "scipy>=1.7.0",
+            "scikit-image>=0.18.0",
+            "pytest>=6.0.0",
+            "pytest-cov>=2.10.0",
+            "sphinx>=4.0.0",
+            "sphinx-rtd-theme>=0.5.0",
         ],
     },
 )
