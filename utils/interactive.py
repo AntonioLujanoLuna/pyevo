@@ -16,6 +16,9 @@ import os
 import json
 from pathlib import Path
 
+# Replace direct import with package import
+from pyevo.optimizers import SNES
+
 class InteractiveOptimizer:
     """
     Interactive wrapper for SNES optimizer that provides runtime control.
@@ -284,7 +287,6 @@ class InteractiveOptimizer:
             InteractiveOptimizer instance with restored state
         """
         # Load optimizer state
-        from snes import SNES
         optimizer = SNES.load_state(checkpoint_path)
         
         # Create interactive optimizer
@@ -310,7 +312,7 @@ class InteractiveOptimizer:
 def run_interactive_example():
     """Example showing how to use the interactive optimizer."""
     import numpy as np
-    from snes import SNES
+    from pyevo.optimizers import SNES
     from utils.constants import DEFAULT_CHECKPOINT_DIR
     
     # Define a simple objective function (minimize x^2)

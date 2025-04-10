@@ -6,15 +6,20 @@ import os
 import sys
 import numpy as np
 
-# Add parent directory to path to import pyevo package
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from pyevo.optimizers import SNES, CMA_ES, PSO
+# Import from the installed package
+try:
+    # Try importing from installed package
+    from pyevo import SNES, CMA_ES, PSO, optimize_with_acceleration, is_gpu_available
+except ImportError:
+    # If not installed, add parent directory to path 
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+    from pyevo import SNES, CMA_ES, PSO, optimize_with_acceleration, is_gpu_available
 
 def simple_objective(x):
     """Simple objective function (sphere function)"""
     return -np.sum(x**2)  # Negative because optimizers maximize
 
-def test_optimizer(optimizer_name, dimensions=5, max_iterations=50):
+def test_optimizer(optimizer_name, dimensions=5, max_iterations=50, use_gpu=False, use_parallel=False):
     """Test a specific optimizer on the sphere function."""
     print(f"\n--- Testing {optimizer_name} optimizer ---")
     
@@ -28,22 +33,15 @@ def test_optimizer(optimizer_name, dimensions=5, max_iterations=50):
     else:
         raise ValueError(f"Unknown optimizer type: {optimizer_name}")
     
-    # Run optimization
-    for i in range(max_iterations):
-        # Generate solutions
-        solutions = optimizer.ask()
-        
-        # Evaluate fitness
-        fitnesses = [simple_objective(solution) for solution in solutions]
-        
-        # Update optimizer
-        optimizer.tell(fitnesses)
-        
-        # Print progress every 10 iterations
-        if i % 10 == 0 or i == max_iterations - 1:
-            best_solution = optimizer.get_best_solution()
-            best_fitness = simple_objective(best_solution)
-            print(f"Iteration {i:3d}: Best fitness = {-best_fitness:.6f}")
+    # Run optimization with acceleration utilities
+    best_solution, best_fitness, stats = optimize_with_acceleration(
+        optimizer=optimizer,
+        fitness_func=simple_objective,
+        max_iterations=max_iterations,
+        use_gpu=use_gpu,
+        use_parallel=use_parallel,
+        callback=lambda opt, iter, imp: print(f"Iteration {iter:3d}: Best fitness = {-opt.get_stats()['best_fitness']:.6f}") if iter % 10 == 0 or iter == max_iterations - 1 else None
+    )
     
     print(f"Final solution: {best_solution[:2]}... (showing first 2 values)")
     print(f"Final fitness: {-best_fitness:.6f} (closer to 0 is better)")
@@ -54,10 +52,20 @@ def main():
     dimensions = 5
     max_iterations = 50
     
+    # Check if GPU is available
+    gpu_available = is_gpu_available()
+    if gpu_available:
+        print("GPU acceleration is available")
+    else:
+        print("GPU acceleration is not available, using CPU only")
+    
+    use_gpu = False  # Set to True to use GPU if available
+    use_parallel = True  # Set to True to use parallel processing
+    
     # Test each optimizer
-    test_optimizer("snes", dimensions, max_iterations)
-    test_optimizer("cmaes", dimensions, max_iterations)
-    test_optimizer("pso", dimensions, max_iterations)
+    test_optimizer("snes", dimensions, max_iterations, use_gpu, use_parallel)
+    test_optimizer("cmaes", dimensions, max_iterations, use_gpu, use_parallel)
+    test_optimizer("pso", dimensions, max_iterations, use_gpu, use_parallel)
 
 if __name__ == "__main__":
     main() 

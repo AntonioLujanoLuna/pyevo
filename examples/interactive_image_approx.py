@@ -14,9 +14,9 @@ import time
 import sys
 import os
 
-# Add parent directory to path to import modules
+# Add parent directory to path to import the SNES module and utils
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from snes import SNES
+from pyevo.optimizers import SNES
 from utils.interactive import InteractiveOptimizer
 from examples.image_approx import (
     load_image, draw_solution, sigmoid, softplus, solution_hash
@@ -25,6 +25,7 @@ from utils.constants import (
     DEFAULT_MAX_IMAGE_SIZE, DEFAULT_RECT_COUNT, DEFAULT_POPULATION_SIZE,
     DEFAULT_ALPHA, DEFAULT_CHECKPOINT_DIR, DEFAULT_OUTPUT_DIR
 )
+from utils.image_processing import calculate_ssim, convolve2d
 
 # Create a global solution cache
 solution_cache = {}
