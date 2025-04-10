@@ -1,6 +1,6 @@
-# PySNES Utilities
+# PyEvo Utilities
 
-This directory contains utility modules that provide common functionality used throughout the PySNES codebase.
+This directory contains utility modules that provide common functionality used throughout the PyEvo codebase.
 
 ## Available Modules
 

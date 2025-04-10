@@ -1,5 +1,5 @@
 """
-Global constants for the PySNES package.
+Global constants for the PyEvo package.
 """
 
 # Image processing constants

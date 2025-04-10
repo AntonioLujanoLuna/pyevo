@@ -1,6 +1,6 @@
-# PySNES: Separable Natural Evolution Strategies in Python
+# PyEvo: Evolutionary Optimization Algorithms in Python
 
-A Python implementation of Separable Natural Evolution Strategies (SNES) and other optimization algorithms for black-box optimization in high-dimensional continuous domains.
+A Python implementation of various evolutionary optimization algorithms for black-box optimization in high-dimensional continuous domains, including Separable Natural Evolution Strategies (SNES), Covariance Matrix Adaptation Evolution Strategy (CMA-ES), and Particle Swarm Optimization (PSO).
 
 ## What is SNES?
 
@@ -55,14 +55,14 @@ This package includes multiple black-box optimization algorithms:
 ## Installation
 
 ```bash
-pip install pysnes
+pip install pyevo
 ```
 
 Or directly from the repository:
 
 ```bash
-git clone https://github.com/AntonioLujanoLuna/pysnes.git
-cd pysnes
+git clone https://github.com/AntonioLujanoLuna/pyevo.git
+cd pyevo
 pip install -e .
 ```
 
@@ -225,10 +225,10 @@ fitnesses = parallel_fitness(solutions, objective, max_workers=4)
 
 ### Interactive Mode
 
-PySNES provides an interactive mode that allows you to control optimization runs in real-time:
+PyEvo provides an interactive mode that allows you to control optimization runs in real-time:
 
 ```python
-from pysnes import SNES
+from pyevo import SNES
 from utils.interactive import InteractiveOptimizer
 
 # Define your objective function

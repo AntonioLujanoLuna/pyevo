@@ -2,7 +2,7 @@
 Optimizer Comparison Example
 
 This script demonstrates how to compare different optimization algorithms
-in PySNES by applying them to standard benchmark functions.
+in PyEvo by applying them to standard benchmark functions.
 """
 
 import os

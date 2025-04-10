@@ -1,5 +1,5 @@
 """
-Utilities package for the PySNES project.
+Utilities package for the PyEvo project.
 
 Contains various utility modules used throughout the codebase.
 """

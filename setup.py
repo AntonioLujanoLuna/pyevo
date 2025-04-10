@@ -4,14 +4,14 @@ with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
 setup(
-    name="pysnes",
+    name="pyevo",
     version="0.1.0",
     author="Antonio Lujano Luna",
     author_email="a00lujano@gmail.com",
-    description="Python implementation of Separable Natural Evolution Strategies",
+    description="Python implementation of Evolutionary Optimization Algorithms",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/AntonioLujanoLuna/pysnes",
+    url="https://github.com/AntonioLujanoLuna/pyevo",
     packages=find_packages(),
     classifiers=[
         "Programming Language :: Python :: 3",
