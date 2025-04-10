@@ -1,5 +1,5 @@
 """
-Separable Natural Evolution Strategies (SNES) implementation in Python.
+Separable Natural Evolution Strategies (SNES) implementation.
 
 SNES is an efficient black-box optimization algorithm especially suited for high-dimensional
 continuous domains. It maintains a search distribution parameterized by a mean vector μ and 
@@ -7,7 +7,7 @@ standard deviation vector σ, which are updated based on the fitness ranking of 
 """
 
 import numpy as np
-from optimizers import Optimizer
+from pyevo.optimizers.base import Optimizer
 
 def get_default_population_count(solution_length):
     """Calculate default population size based on solution length.
@@ -226,4 +226,4 @@ class SNES(Optimizer):
             self.center = np.array(center, dtype=np.float32)
             
         if sigma is not None:
-            self.sigma = np.array(sigma, dtype=np.float32)
+            self.sigma = np.array(sigma, dtype=np.float32) 

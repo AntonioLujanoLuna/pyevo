@@ -8,9 +8,9 @@ import numpy as np
 import sys
 import os
 
-# Add parent directory to path to import the SNES module
+# Add parent directory to path to import the PyEvo package
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from snes import SNES, get_default_population_count
+from pyevo.optimizers.snes import SNES, get_default_population_count
 
 class TestSNES(unittest.TestCase):
     """Test cases for the SNES optimizer."""

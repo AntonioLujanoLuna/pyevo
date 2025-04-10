@@ -2,8 +2,13 @@
 Simple test script to verify the optimization algorithms work correctly.
 """
 
+import os
+import sys
 import numpy as np
-from utils import create_optimizer
+
+# Add parent directory to path to import pyevo package
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from pyevo.optimizers import SNES, CMA_ES, PSO
 
 def simple_objective(x):
     """Simple objective function (sphere function)"""
@@ -13,12 +18,15 @@ def test_optimizer(optimizer_name, dimensions=5, max_iterations=50):
     """Test a specific optimizer on the sphere function."""
     print(f"\n--- Testing {optimizer_name} optimizer ---")
     
-    # Create optimizer
-    optimizer = create_optimizer(
-        optimizer_type=optimizer_name,
-        solution_length=dimensions,
-        random_seed=42
-    )
+    # Create optimizer based on name
+    if optimizer_name == "snes":
+        optimizer = SNES(solution_length=dimensions, random_seed=42)
+    elif optimizer_name == "cmaes":
+        optimizer = CMA_ES(solution_length=dimensions, random_seed=42)
+    elif optimizer_name == "pso":
+        optimizer = PSO(solution_length=dimensions, random_seed=42)
+    else:
+        raise ValueError(f"Unknown optimizer type: {optimizer_name}")
     
     # Run optimization
     for i in range(max_iterations):

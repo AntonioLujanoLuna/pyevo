@@ -23,15 +23,8 @@ def create_optimizer(optimizer_type=DEFAULT_OPTIMIZER, **kwargs):
     Raises:
         ValueError: If the optimizer type is not supported
     """
-    import sys
-    import os
-    
-    # Add the parent directory to the path to ensure we can import
-    # modules from the root directory
-    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-    
-    from snes import SNES
-    from optimizers import CMA_ES, PSO
+    # Import optimizers from the new structure
+    from pyevo.optimizers import SNES, CMA_ES, PSO
     
     # Available optimizer types
     optimizer_classes = {

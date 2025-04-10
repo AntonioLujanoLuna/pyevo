@@ -8,9 +8,9 @@ import numpy as np
 import sys
 import os
 
-# Add parent directory to path to import the optimizers module
+# Add parent directory to path to import the PyEvo package
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from optimizers import PSO
+from pyevo.optimizers.pso import PSO
 
 class TestPSO(unittest.TestCase):
     """Test cases for the PSO optimizer."""
