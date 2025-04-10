@@ -13,6 +13,14 @@ DEFAULT_ALPHA = 0.05          # Default learning rate
 DEFAULT_EARLY_STOP = 1e-6     # Default early stopping tolerance
 DEFAULT_PATIENCE = 10         # Default number of epochs to wait before early stopping
 
+# Optimizer options
+OPTIMIZERS = {
+    "snes": "Separable Natural Evolution Strategies",
+    "cmaes": "Covariance Matrix Adaptation Evolution Strategy",
+    "pso": "Particle Swarm Optimization",
+}
+DEFAULT_OPTIMIZER = "snes"
+
 # File paths
 DEFAULT_OUTPUT_DIR = "examples/output"        # Default output directory
 DEFAULT_CHECKPOINT_DIR = "examples/checkpoints"  # Default checkpoint directory

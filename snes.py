@@ -7,6 +7,7 @@ standard deviation vector σ, which are updated based on the fitness ranking of 
 """
 
 import numpy as np
+from optimizers import Optimizer
 
 def get_default_population_count(solution_length):
     """Calculate default population size based on solution length.
@@ -19,7 +20,7 @@ def get_default_population_count(solution_length):
     """
     return 4 + int(3 * np.log(solution_length))
 
-class SNES:
+class SNES(Optimizer):
     """Separable Natural Evolution Strategy optimizer.
     
     SNES optimizes a black-box objective function by maintaining a search distribution

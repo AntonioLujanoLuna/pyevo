@@ -75,10 +75,5 @@ venv.bak/
 .idea/
 
 # Output files
-examples/output/
 checkpoints/
 examples/checkpoints/
-*.png
-*.jpg
-*.gif
-!examples/resources/*.jpg

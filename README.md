@@ -1,6 +1,6 @@
 # PySNES: Separable Natural Evolution Strategies in Python
 
-A Python implementation of Separable Natural Evolution Strategies (SNES), a powerful black-box optimization algorithm for high-dimensional continuous domains.
+A Python implementation of Separable Natural Evolution Strategies (SNES) and other optimization algorithms for black-box optimization in high-dimensional continuous domains.
 
 ## What is SNES?
 
@@ -18,6 +18,27 @@ SNES works by:
 
 The "separable" aspect means each dimension is treated independently, which reduces computational complexity and makes the algorithm suitable for high-dimensional problems.
 
+## Included Optimization Algorithms
+
+This package includes multiple black-box optimization algorithms:
+
+1. **SNES (Separable Natural Evolution Strategies)**
+   - Fast, efficient algorithm for high-dimensional optimization
+   - Diagonal covariance matrix (treats dimensions separately)
+   - Linear time complexity with respect to problem dimensionality
+
+2. **CMA-ES (Covariance Matrix Adaptation Evolution Strategy)**
+   - Powerful, state-of-the-art evolutionary algorithm
+   - Full covariance matrix adaptation (can capture parameter interactions)
+   - Quadratic time complexity with respect to problem dimensionality
+   - Better for problems with parameter dependencies
+
+3. **PSO (Particle Swarm Optimization)**
+   - Nature-inspired algorithm based on social behavior
+   - No probability distribution modeling
+   - Often faster convergence on simple problems
+   - Can get trapped in local optima more easily than ES methods
+
 ## Core Features
 
 - Clean, NumPy-based implementation optimized for performance
@@ -29,6 +50,7 @@ The "separable" aspect means each dimension is treated independently, which redu
 - Early stopping to avoid wasted computation
 - Checkpointing for long-running optimizations
 - Progress tracking and statistics
+- **Multiple optimization algorithms with a unified interface**
 
 ## Installation
 
@@ -58,14 +80,18 @@ pip install -e .
 
 ```python
 import numpy as np
-from pysnes import SNES
+from utils import create_optimizer
 
 # Define objective function (minimize x^2)
 def objective(x):
-    return -np.sum(x**2)  # Negative because SNES maximizes
+    return -np.sum(x**2)  # Negative because optimizers maximize
 
 # Initialize optimizer (50-dimensional problem)
-optimizer = SNES(solution_length=50)
+# You can choose between 'snes', 'cmaes', or 'pso'
+optimizer = create_optimizer(
+    optimizer_type='snes',  # Try 'cmaes' or 'pso' as well
+    solution_length=50
+)
 
 # Run for 100 iterations
 for i in range(100):
@@ -91,7 +117,7 @@ for i in range(100):
 
 ## Examples
 
-This repository includes examples demonstrating SNES in action:
+This repository includes examples demonstrating the optimization algorithms in action:
 
 1. **ASCII Evolution**: Evolving text to match a target string
    ```bash
@@ -124,6 +150,59 @@ This repository includes examples demonstrating SNES in action:
    - `--patience`: Number of epochs to wait before early stopping (default: 10)
    - `--checkpoint`: Path to save optimizer checkpoint
    - `--no-display`: Disable live progress visualization
+
+### Algorithm Comparison 
+
+Compare the performance of different optimization algorithms on standard benchmark functions:
+
+```bash
+python examples/optimizer_comparison.py
+```
+
+This example:
+- Runs SNES, CMA-ES, and PSO on various benchmark functions
+- Compares convergence speed and final solution quality
+- Generates plots showing performance over time
+- Reports runtime statistics for each algorithm
+
+Additional options:
+- `--dimensions`: Dimensionality of the test problems (default: 10)
+- `--iterations`: Maximum number of iterations (default: 300)
+- `--trials`: Number of trials to run per algorithm (default: 3)
+- `--output`: Directory for output plots and data
+- `--benchmarks`: Benchmark functions to use (default: sphere, rosenbrock, rastrigin)
+- `--optimizers`: Algorithms to compare (default: snes, cmaes, pso)
+
+### Image Approximation Results
+
+Here's an example of the image approximation capabilities of SNES:
+
+#### Original vs. Approximated Image
+
+<table>
+  <tr>
+    <td><img src="examples/resources/image.jpg" alt="Original Image" width="400"/></td>
+    <td><img src="examples/output/examples/output/image_approximated.jpg" alt="Approximated with 750 rectangles" width="400"/></td>
+  </tr>
+  <tr>
+    <td>Original Image</td>
+    <td>Approximated with 750 rectangles (PSNR: 18.03 dB)</td>
+  </tr>
+</table>
+
+#### Evolution Process
+
+This animation shows how the image approximation evolves over time:
+
+<p align="center">
+  <img src="examples/output/examples/output/image_evolution.gif" alt="Evolution process" width="600"/>
+</p>
+
+The approximation was generated using:
+
+```bash
+python examples/image_approx.py --image examples/resources/image.jpg --rects 750 --max-size 384 --display-interval 5 --gif-frames 50 --population 24
+```
 
 ## Advanced Features
 
