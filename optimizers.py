@@ -84,6 +84,10 @@ class CMA_ES(Optimizer):
     a full covariance matrix instead of just diagonal variances like SNES.
     This makes it more powerful on problems with parameter interactions but
     also more computationally expensive.
+    
+    This implementation follows the canonical CMA-ES algorithm as described in:
+    Hansen, N. (2016). The CMA Evolution Strategy: A Tutorial.
+    arXiv:1604.00772.
     """
     
     def __init__(self, 
@@ -109,14 +113,15 @@ class CMA_ES(Optimizer):
         
         # Set dimensionality
         self.solution_length = solution_length
+        n = solution_length  # For shorter notation in formulas
         
-        # Set population size (lambda)
+        # Set population size (lambda) - use canonical formula
         if population_count is None:
-            self.population_count = 4 + int(3 * np.log(solution_length))
+            self.population_count = 4 + int(3 * np.log(n))
         else:
             self.population_count = population_count
             
-        # Set parent number (mu)
+        # Set parent number (mu) - canonical is lambda/2
         self.parent_number = self.population_count // 2
             
         # Initialize center (mean)
@@ -141,27 +146,44 @@ class CMA_ES(Optimizer):
         self.B = np.eye(solution_length, dtype=np.float32)  # Eigenvectors of C
         self.D = np.ones(solution_length, dtype=np.float32)  # Eigenvalues of C (sqrt)
         
-        # Strategy parameters
-        self.cc = 4.0 / solution_length  # Learning rate for rank-one update
-        self.cs = 4.0 / solution_length  # Learning rate for step size control
-        self.c1 = 2.0 / (solution_length**2)  # Learning rate for rank-one update
-        self.cmu = min(1 - self.c1, 0.2 * (self.parent_number / (solution_length**2)))  # Learning rate for rank-mu update
+        # Initialize weights for recombination (use log-weighting from canonical CMA-ES)
+        self.weights = np.log(self.parent_number + 0.5) - np.log(np.arange(1, self.parent_number + 1))
+        self.weights = self.weights / np.sum(self.weights)
+        self.mueff = 1 / np.sum(self.weights**2)  # Variance effective selection mass
+        
+        # Set strategy parameters according to canonical CMA-ES
+        # Learning rate for cumulation for the rank-one update
+        self.cc = (4 + self.mueff/n) / (n + 4 + 2*self.mueff/n)
+        
+        # Learning rate for cumulation for the step size
+        self.cs = (self.mueff + 2) / (n + self.mueff + 5)
+        
+        # Learning rate for rank-one update
+        self.c1 = 2 / ((n + 1.3)**2 + self.mueff)
+        
+        # Learning rate for rank-mu update
+        self.cmu = min(1 - self.c1, 2 * (self.mueff - 2 + 1/self.mueff) / ((n + 2)**2 + self.mueff))
+        
+        # Damping parameter for step size update
+        self.damps = 1 + 2 * max(0, np.sqrt((self.mueff - 1) / (n + 1)) - 1) + self.cs
         
         # Evolution paths
         self.ps = np.zeros(solution_length, dtype=np.float32)  # Evolution path for sigma
         self.pc = np.zeros(solution_length, dtype=np.float32)  # Evolution path for C
         
-        # Expected length of random vector
+        # Expected length of random vector (chiN)
         self.chiN = np.sqrt(solution_length) * (1 - 1.0/(4*solution_length) + 1.0/(21*solution_length**2))
         
-        # Weight vector for recombination
-        self.weights = np.log(self.parent_number + 0.5) - np.log(np.arange(1, self.parent_number + 1))
-        self.weights = self.weights / np.sum(self.weights)
-        self.mueff = 1 / np.sum(self.weights**2)  # Variance effective selection mass
+        # Eigendecomposition tracking
+        self.eigeneval = 0  # Counter for tracking when to do the next eigendecomposition
+        self.eigeneval_freq = (solution_length + 2) / 3  # Eigendecomposition frequency
         
         # Storage for current generation
         self.solutions = np.zeros((self.population_count, solution_length), dtype=np.float32)
         self.z = np.zeros((self.population_count, solution_length), dtype=np.float32)
+        
+        # Generation counter
+        self.generation = 0
         
     def ask(self):
         """Generate a new batch of solutions to evaluate.
@@ -190,6 +212,9 @@ class CMA_ES(Optimizer):
         if len(fitnesses) != self.population_count:
             raise ValueError("Mismatch between population size and fitness values")
         
+        # Increment generation counter
+        self.generation += 1
+        
         # Sort by fitness (descending order)
         sorted_indices = np.argsort(-np.array(fitnesses))
         best_fitness = fitnesses[sorted_indices[0]]
@@ -204,36 +229,65 @@ class CMA_ES(Optimizer):
             self.center += self.weights[i] * self.solutions[idx]
             
         # Update evolution paths
-        y = self.center - old_center
-        z = np.dot(np.linalg.inv(np.dot(self.B, np.diag(self.D))), y) / self.sigma
+        y = self.center - old_center  # Realized shift of the mean
         
-        # Update step size evolution path ps
+        # Compute z using the C^(-1/2) operation: C^(-1/2) = B D^(-1) B'
+        z = np.dot(self.B, np.diag(1/self.D)) @ np.dot(self.B.T, y) / self.sigma
+        
+        # Update step size evolution path ps - conjugate evolution path
+        # Normalize by sqrt(cs(2-cs)) for correct expectation of ||ps||
         self.ps = (1 - self.cs) * self.ps + np.sqrt(self.cs * (2 - self.cs) * self.mueff) * z
         
+        # Compute the threshold for hz (hsig)
+        hsig = int(np.linalg.norm(self.ps) / 
+                 np.sqrt(1 - (1 - self.cs)**(2*self.generation)) / self.chiN < 1.4 + 2/(self.solution_length+1))
+        
         # Update covariance matrix evolution path pc
-        hsig = np.linalg.norm(self.ps) / np.sqrt(1 - (1 - self.cs)**(2 * (self.solution_length + 1))) < 1.4 + 2 / (self.solution_length + 1)
         self.pc = (1 - self.cc) * self.pc
         if hsig:
             self.pc += np.sqrt(self.cc * (2 - self.cc) * self.mueff) * y / self.sigma
             
-        # Update covariance matrix
-        artmp = (1 / self.sigma) * np.array([self.solutions[i] - old_center for i in selected_indices])
+        # Calculate weighted deviations from old mean
+        # artmp has shape (parent_number, solution_length)
+        artmp = np.array([(self.solutions[idx] - old_center) / self.sigma for idx in selected_indices])
+        
+        # Update covariance matrix - combine rank-one and rank-mu updates
         self.C = (1 - self.c1 - self.cmu) * self.C + \
-                 self.c1 * (np.outer(self.pc, self.pc) + (1 - hsig) * self.cc * (2 - self.cc) * self.C) + \
-                 self.cmu * np.sum([self.weights[i] * np.outer(artmp[i], artmp[i]) for i in range(self.parent_number)], axis=0)
+                 self.c1 * (np.outer(self.pc, self.pc) + (1 - hsig) * self.cc * (2 - self.cc) * self.C)
         
-        # Update step size
-        self.sigma *= np.exp((np.linalg.norm(self.ps) / self.chiN - 1) * self.cs / 2)
+        # Compute the rank-mu update term
+        weighted_artmp = np.array([self.weights[i] * np.outer(artmp[i], artmp[i]) for i in range(self.parent_number)])
+        self.C += self.cmu * np.sum(weighted_artmp, axis=0)
         
-        # Eigendecomposition of C
+        # Update step size using cumulative step-size adaptation (CSA)
+        self.sigma *= np.exp((np.linalg.norm(self.ps) / self.chiN - 1) * self.cs / self.damps)
+        
+        # Enforce positive definiteness of C by adding a small diagonal
         if np.any(~np.isfinite(self.C)):
-            self.C = np.eye(self.solution_length)
+            # Reset C if it contains non-finite values
+            self.C = np.eye(self.solution_length, dtype=np.float32)
+        
+        # Perform eigendecomposition if needed (canonical approach)
+        self.eigeneval += 1
+        if self.eigeneval >= self.eigeneval_freq:
+            self.eigeneval = 0
             
-        # Perform eigendecomposition every so often
-        if np.random.rand() < 0.05:  # ~20 generations
-            eigenvalues, eigenvectors = np.linalg.eigh(self.C)
-            self.D = np.sqrt(eigenvalues)
-            self.B = eigenvectors
+            # Add a small regularization term to ensure numerical stability
+            min_eig = 1e-14 * np.trace(self.C) / self.solution_length
+            self.C += np.eye(self.solution_length) * min_eig
+            
+            # Perform eigendecomposition
+            try:
+                eigenvalues, eigenvectors = np.linalg.eigh(self.C)
+                # Ensure eigenvalues are positive
+                eigenvalues = np.maximum(eigenvalues, 0)
+                self.D = np.sqrt(eigenvalues)
+                self.B = eigenvectors
+            except np.linalg.LinAlgError:
+                # In case of numerical issues, fall back to identity decomposition
+                self.C = np.eye(self.solution_length)
+                self.D = np.ones(self.solution_length)
+                self.B = np.eye(self.solution_length)
             
         # Return improvement metric for early stopping
         if hasattr(self, 'previous_best'):
@@ -264,6 +318,7 @@ class CMA_ES(Optimizer):
             "center_max": float(np.max(self.center)),
             "sigma": float(self.sigma),
             "condition_number": float(np.max(self.D) / np.min(self.D + 1e-10)),
+            "generations": self.generation,
             "best_fitness": float(self.previous_best) if hasattr(self, 'previous_best') else None
         }
     
@@ -284,6 +339,7 @@ class CMA_ES(Optimizer):
             pc=self.pc,
             solution_length=self.solution_length,
             population_count=self.population_count,
+            generation=self.generation,
             previous_best=getattr(self, 'previous_best', None)
         )
     
@@ -312,6 +368,9 @@ class CMA_ES(Optimizer):
         optimizer.ps = data['ps']
         optimizer.pc = data['pc']
         
+        if 'generation' in data:
+            optimizer.generation = int(data['generation'])
+        
         if 'previous_best' in data and data['previous_best'] is not None:
             optimizer.previous_best = float(data['previous_best'])
         return optimizer
@@ -335,6 +394,8 @@ class CMA_ES(Optimizer):
         self.D = np.ones(self.solution_length, dtype=np.float32)
         self.ps = np.zeros(self.solution_length, dtype=np.float32)
         self.pc = np.zeros(self.solution_length, dtype=np.float32)
+        self.generation = 0
+        self.eigeneval = 0
 
 
 class PSO(Optimizer):
