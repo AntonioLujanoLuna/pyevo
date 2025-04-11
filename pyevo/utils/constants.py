@@ -18,6 +18,10 @@ OPTIMIZERS = {
     "snes": "Separable Natural Evolution Strategies",
     "cmaes": "Covariance Matrix Adaptation Evolution Strategy",
     "pso": "Particle Swarm Optimization",
+    "de": "Differential Evolution",
+    "sa": "Simulated Annealing",
+    "ga": "Genetic Algorithm",
+    "cem": "Cross-Entropy Method",
 }
 DEFAULT_OPTIMIZER = "snes"
 

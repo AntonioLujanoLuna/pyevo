@@ -11,6 +11,15 @@ import os
 import numpy as np
 import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
+from typing import Callable, Dict, List, Tuple, Optional, Any, Union, TypeVar
+
+# Import Optimizer type only for type annotations while avoiding circular imports
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from pyevo.optimizers.base import Optimizer
+
+# Type variable for array-like objects (can be numpy or cupy arrays)
+ArrayLike = TypeVar('ArrayLike', bound=np.ndarray)
 
 # Try to import CuPy for GPU acceleration
 try:
@@ -19,7 +28,7 @@ try:
 except ImportError:
     HAS_CUPY = False
     
-def is_gpu_available():
+def is_gpu_available() -> bool:
     """Check if GPU acceleration is available via CuPy."""
     return HAS_CUPY
 
@@ -202,10 +211,19 @@ def parallel_evaluate(fitness_func, solutions, max_workers=None, **kwargs):
     
     return fitnesses
 
-def optimize_with_acceleration(optimizer, fitness_func, max_iterations=100, 
-                               use_gpu=False, use_parallel=False, max_workers=None, 
-                               batch_size=None, callback=None, checkpoint_freq=None, 
-                               checkpoint_path=None, **kwargs):
+def optimize_with_acceleration(
+    optimizer: 'Optimizer', 
+    fitness_func: Callable[[ArrayLike], Union[float, ArrayLike]], 
+    max_iterations: int = 100, 
+    use_gpu: bool = False, 
+    use_parallel: bool = False, 
+    max_workers: Optional[int] = None, 
+    batch_size: Optional[int] = None, 
+    callback: Optional[Callable[['Optimizer', int, float], None]] = None,
+    checkpoint_freq: Optional[int] = None,
+    checkpoint_path: Optional[str] = None,
+    **kwargs: Any
+) -> Tuple[ArrayLike, float, Dict[str, List]]:
     """
     Run optimization with GPU acceleration and/or parallel processing.
     
@@ -218,14 +236,14 @@ def optimize_with_acceleration(optimizer, fitness_func, max_iterations=100,
         max_workers: Maximum number of worker processes for parallel evaluation
         batch_size: Batch size for GPU processing
         callback: Optional callback function called after each iteration
-        checkpoint_freq: How often to save checkpoints (in iterations)
-        checkpoint_path: Path to save checkpoints
+        checkpoint_freq: How often to save checkpoints (iterations)
+        checkpoint_path: Directory to save checkpoints
         **kwargs: Additional arguments to pass to fitness_func
         
     Returns:
         tuple: (best_solution, best_fitness, stats)
     """
-    stats = {
+    stats: Dict[str, List] = {
         'iterations': [],
         'best_fitness': [],
         'improvement': [],

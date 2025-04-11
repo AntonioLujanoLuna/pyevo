@@ -8,6 +8,10 @@ Core algorithms:
 - SNES (Separable Natural Evolution Strategies)
 - CMA-ES (Covariance Matrix Adaptation Evolution Strategy)
 - PSO (Particle Swarm Optimization)
+- DE (Differential Evolution)
+- SA (Simulated Annealing)
+- GA (Genetic Algorithm)
+- CEM (Cross-Entropy Method)
 
 Visit https://github.com/AntonioLujanoLuna/pyevo for more information.
 """
@@ -16,7 +20,11 @@ Visit https://github.com/AntonioLujanoLuna/pyevo for more information.
 from pyevo.optimizers import (
     SNES, 
     CMA_ES, 
-    PSO, 
+    PSO,
+    DE,
+    SimulatedAnnealing,
+    GeneticAlgorithm,
+    CrossEntropyMethod,
     Optimizer,
     get_default_population_count
 )
@@ -68,6 +76,10 @@ __all__ = [
     "SNES",
     "CMA_ES",
     "PSO",
+    "DE",
+    "SimulatedAnnealing",
+    "GeneticAlgorithm", 
+    "CrossEntropyMethod",
     "get_default_population_count",
     
     # Acceleration utilities
