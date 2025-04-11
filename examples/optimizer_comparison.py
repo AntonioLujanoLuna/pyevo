@@ -9,8 +9,8 @@ import os
 import time
 import numpy as np
 import matplotlib.pyplot as plt
-from utils import create_optimizer
-from utils.constants import OPTIMIZERS, DEFAULT_OUTPUT_DIR
+from pyevo.utils import create_optimizer
+from pyevo.utils.constants import OPTIMIZERS, DEFAULT_OUTPUT_DIR
 
 # Set random seed for reproducibility
 RANDOM_SEED = 42

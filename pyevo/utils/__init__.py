@@ -41,6 +41,39 @@ from pyevo.utils.image import (
     get_optimal_image_functions
 )
 
+def create_optimizer(optimizer_type="snes", **kwargs):
+    """Create an optimizer instance based on the specified type.
+    
+    Args:
+        optimizer_type: Type of optimizer to create (default: "snes")
+        **kwargs: Additional arguments to pass to the optimizer constructor
+        
+    Returns:
+        Optimizer instance
+        
+    Raises:
+        ValueError: If the optimizer type is not supported
+    """
+    # Import optimizers from the package
+    from pyevo.optimizers import SNES, CMA_ES, PSO
+    
+    # Available optimizer types
+    optimizer_classes = {
+        "snes": SNES,
+        "cmaes": CMA_ES,
+        "pso": PSO,
+    }
+    
+    # Ensure optimizer_type is lowercase for case-insensitive matching
+    optimizer_type = optimizer_type.lower()
+    
+    if optimizer_type not in optimizer_classes:
+        raise ValueError(f"Unsupported optimizer type: {optimizer_type}. "
+                         f"Available types: {', '.join(optimizer_classes.keys())}")
+    
+    # Create and return the optimizer instance
+    return optimizer_classes[optimizer_type](**kwargs)
+
 __all__ = [
     # Acceleration
     "is_gpu_available",
@@ -67,5 +100,8 @@ __all__ = [
     # Image
     "calculate_ssim",
     "convolve2d",
-    "get_optimal_image_functions"
+    "get_optimal_image_functions",
+    
+    # Helper function
+    "create_optimizer"
 ] 

@@ -80,7 +80,7 @@ pip install -e .
 
 ```python
 import numpy as np
-from utils import create_optimizer
+from pyevo.utils import create_optimizer
 
 # Define objective function (minimize x^2)
 def objective(x):
@@ -229,7 +229,7 @@ PyEvo provides an interactive mode that allows you to control optimization runs 
 
 ```python
 from pyevo import SNES
-from utils.interactive import InteractiveOptimizer
+from pyevo.utils.interactive import InteractiveOptimizer
 
 # Define your objective function
 def objective(x):
