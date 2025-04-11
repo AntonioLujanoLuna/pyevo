@@ -1,6 +1,6 @@
 # PyEvo: Evolutionary Optimization Algorithms in Python
 
-A Python implementation of various evolutionary optimization algorithms for black-box optimization in high-dimensional continuous domains, including Separable Natural Evolution Strategies (SNES), Covariance Matrix Adaptation Evolution Strategy (CMA-ES), and Particle Swarm Optimization (PSO).
+A Python implementation of various evolutionary optimization algorithms for black-box optimization in high-dimensional continuous domains, including Separable Natural Evolution Strategies (SNES), Covariance Matrix Adaptation Evolution Strategy (CMA-ES), Particle Swarm Optimization (PSO), Differential Evolution (DE), Simulated Annealing (SA), Genetic Algorithms (GA), and Cross-Entropy Method (CEM).
 
 ## What is SNES?
 
@@ -38,6 +38,30 @@ This package includes multiple black-box optimization algorithms:
    - No probability distribution modeling
    - Often faster convergence on simple problems
    - Can get trapped in local optima more easily than ES methods
+
+4. **DE (Differential Evolution)**
+   - Population-based stochastic optimization algorithm
+   - Simple but effective mutation and crossover mechanisms
+   - Good performance on multimodal and non-differentiable problems
+   - Robust to noise and can handle constraints well
+
+5. **SA (Simulated Annealing)**
+   - Inspired by the annealing process in metallurgy
+   - Can escape local optima through probabilistic acceptance of worse solutions
+   - Temperature parameter controls exploration vs. exploitation
+   - Works well on discrete and continuous problems
+
+6. **GA (Genetic Algorithms)**
+   - Classic evolutionary approach using selection, crossover, and mutation
+   - Effective for combinatorial optimization problems
+   - Maintains population diversity through genetic operators
+   - Flexible representation of solutions
+
+7. **CEM (Cross-Entropy Method)**
+   - Probability-based optimization algorithm
+   - Iteratively refines a probability distribution over the solution space
+   - Samples elite solutions to update distribution parameters
+   - Effective for both continuous and combinatorial optimization
 
 ## Core Features
 
@@ -87,9 +111,9 @@ def objective(x):
     return -np.sum(x**2)  # Negative because optimizers maximize
 
 # Initialize optimizer (50-dimensional problem)
-# You can choose between 'snes', 'cmaes', or 'pso'
+# You can choose from 'snes', 'cmaes', 'pso', 'de', 'sa', 'ga', or 'cem'
 optimizer = create_optimizer(
-    optimizer_type='snes',  # Try 'cmaes' or 'pso' as well
+    optimizer_type='snes',  # Try any of the available optimizers
     solution_length=50
 )
 
@@ -160,7 +184,7 @@ python examples/optimizer_comparison.py
 ```
 
 This example:
-- Runs SNES, CMA-ES, and PSO on various benchmark functions
+- Runs all available optimization algorithms (SNES, CMA-ES, PSO, DE, SA, GA, CEM) on various benchmark functions
 - Compares convergence speed and final solution quality
 - Generates plots showing performance over time
 - Reports runtime statistics for each algorithm
@@ -171,7 +195,7 @@ Additional options:
 - `--trials`: Number of trials to run per algorithm (default: 3)
 - `--output`: Directory for output plots and data
 - `--benchmarks`: Benchmark functions to use (default: sphere, rosenbrock, rastrigin)
-- `--optimizers`: Algorithms to compare (default: snes, cmaes, pso)
+- `--optimizers`: Algorithms to compare (default: all available optimizers)
 
 ### Image Approximation Results
 
