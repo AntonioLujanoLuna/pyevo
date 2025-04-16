@@ -1,4 +1,6 @@
 from abc import ABC, abstractmethod
+from typing import Any, Sequence, Optional
+import numpy as np
 
 class Optimizer(ABC):
     """Base optimizer interface.
@@ -8,7 +10,7 @@ class Optimizer(ABC):
     """
     
     @abstractmethod
-    def ask(self):
+    def ask(self) -> np.ndarray:
         """Generate a new batch of solutions to evaluate.
         
         Returns:
@@ -17,7 +19,7 @@ class Optimizer(ABC):
         pass
     
     @abstractmethod
-    def tell(self, fitnesses, tolerance=1e-6):
+    def tell(self, fitnesses: Sequence[float], tolerance: float = 1e-6) -> float:
         """Update parameters based on fitness values.
         
         Args:
@@ -31,7 +33,7 @@ class Optimizer(ABC):
         pass
     
     @abstractmethod
-    def get_best_solution(self):
+    def get_best_solution(self) -> np.ndarray:
         """Return current best estimate of the solution.
         
         Returns:
@@ -40,7 +42,7 @@ class Optimizer(ABC):
         pass
     
     @abstractmethod
-    def get_stats(self):
+    def get_stats(self) -> dict[str, Any]:
         """Return current optimizer statistics.
         
         Returns:
@@ -49,7 +51,7 @@ class Optimizer(ABC):
         pass
     
     @abstractmethod
-    def save_state(self, filename):
+    def save_state(self, filename: str) -> None:
         """Save optimizer state to file.
         
         Args:
@@ -58,7 +60,7 @@ class Optimizer(ABC):
         pass
     
     @abstractmethod
-    def reset(self, center=None, sigma=None):
+    def reset(self, center: Optional[np.ndarray] = None, sigma: Optional[np.ndarray] = None) -> None:
         """Reset the optimizer with optional new parameters.
         
         Args:

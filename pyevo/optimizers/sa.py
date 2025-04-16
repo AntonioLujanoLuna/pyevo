@@ -8,6 +8,7 @@ with the probability of acceptance decreasing as the algorithm progresses.
 """
 
 import numpy as np
+from typing import Optional, Sequence, Any
 from pyevo.optimizers.base import Optimizer
 
 class SimulatedAnnealing(Optimizer):
@@ -19,14 +20,14 @@ class SimulatedAnnealing(Optimizer):
     """
     
     def __init__(self, 
-                 solution_length,
-                 initial_temp=100.0,
-                 cooling_factor=0.95,
-                 step_size=0.1,
-                 min_temp=1e-6,
-                 bounds=None,
-                 initial_solution=None,
-                 random_seed=None):
+                 solution_length: int,
+                 initial_temp: float = 100.0,
+                 cooling_factor: float = 0.95,
+                 step_size: float = 0.1,
+                 min_temp: float = 1e-6,
+                 bounds: Optional[np.ndarray] = None,
+                 initial_solution: Optional[np.ndarray] = None,
+                 random_seed: Optional[int] = None) -> None:
         """
         Initialize the Simulated Annealing optimizer.
         
@@ -88,7 +89,7 @@ class SimulatedAnnealing(Optimizer):
         self.accepted_count = 0
         self.rejected_count = 0
         
-    def ask(self):
+    def ask(self) -> np.ndarray:
         """Generate a new candidate solution to evaluate.
         
         Returns:
@@ -106,7 +107,7 @@ class SimulatedAnnealing(Optimizer):
         # Return candidate solution for evaluation
         return np.array([self.candidate_solution])
     
-    def _acceptance_probability(self, current_fitness, candidate_fitness):
+    def _acceptance_probability(self, current_fitness: float, candidate_fitness: float) -> float:
         """Calculate the probability of accepting a worse solution.
         
         Args:
@@ -123,7 +124,7 @@ class SimulatedAnnealing(Optimizer):
         # Otherwise, calculate acceptance probability based on temperature
         return np.exp((candidate_fitness - current_fitness) / self.temperature)
     
-    def tell(self, fitnesses, tolerance=1e-6):
+    def tell(self, fitnesses: Sequence[float], tolerance: float = 1e-6) -> float:
         """Update state based on fitness evaluation.
         
         Args:
@@ -169,15 +170,14 @@ class SimulatedAnnealing(Optimizer):
         
         return improvement
     
-    def get_best_solution(self):
+    def get_best_solution(self) -> np.ndarray:
         """Return the best solution found so far.
-        
         Returns:
-            Best solution found
+            The best solution vector found during optimization
         """
         return self.best_solution.copy()
     
-    def get_stats(self):
+    def get_stats(self) -> dict[str, Any]:
         """Return current optimizer statistics.
         
         Returns:
@@ -193,7 +193,7 @@ class SimulatedAnnealing(Optimizer):
             "current_fitness": float(self.current_fitness) if hasattr(self, 'current_fitness') else None
         }
     
-    def save_state(self, filename):
+    def save_state(self, filename: str) -> None:
         """Save optimizer state to file.
         
         Args:
@@ -219,7 +219,7 @@ class SimulatedAnnealing(Optimizer):
         )
     
     @classmethod
-    def load_state(cls, filename):
+    def load_state(cls, filename: str) -> 'SimulatedAnnealing':
         """Load optimizer state from file.
         
         Args:
@@ -257,7 +257,7 @@ class SimulatedAnnealing(Optimizer):
             
         return optimizer
     
-    def reset(self, initial_solution=None, temperature=None, step_size=None):
+    def reset(self, initial_solution: Optional[np.ndarray] = None, temperature: Optional[float] = None, step_size: Optional[float] = None) -> None:
         """Reset the optimizer.
         
         Args:

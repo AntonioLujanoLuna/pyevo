@@ -7,9 +7,10 @@ standard deviation vector σ, which are updated based on the fitness ranking of 
 """
 
 import numpy as np
+from typing import Optional, Sequence, Any, ClassVar
 from pyevo.optimizers.base import Optimizer
 
-def get_default_population_count(solution_length):
+def get_default_population_count(solution_length: int) -> int:
     """Calculate default population size based on solution length.
     
     Args:
@@ -27,13 +28,15 @@ class SNES(Optimizer):
     and iteratively adapting it based on the fitness of sampled solutions.
     """
     
-    def __init__(self, 
-                 solution_length,
-                 population_count=None,
-                 alpha=0.05,
-                 center=None,
-                 sigma=None,
-                 random_seed=None):
+    def __init__(
+        self,
+        solution_length: int,
+        population_count: Optional[int] = None,
+        alpha: float = 0.05,
+        center: Optional[np.ndarray] = None,
+        sigma: Optional[np.ndarray] = None,
+        random_seed: Optional[int] = None
+    ) -> None:
         """
         Initialize the Separable Natural Evolution Strategy optimizer.
         
@@ -47,40 +50,40 @@ class SNES(Optimizer):
         """
         # Set population count
         if population_count is None:
-            self.population_count = get_default_population_count(solution_length)
+            self.population_count: int = get_default_population_count(solution_length)
         else:
-            self.population_count = population_count
+            self.population_count: int = population_count
             
-        self.solution_length = solution_length
+        self.solution_length: int = solution_length
         
         # Set random state
-        self.rng = np.random.RandomState(random_seed)
+        self.rng: np.random.RandomState = np.random.RandomState(random_seed)
         
         # Set parameters for update rates
-        self.eta_center = 1.0
+        self.eta_center: float = 1.0
         # From the paper: https://people.idsia.ch/~juergen/xNES2010gecco.pdf
-        self.eta_sigma = (3 + np.log(solution_length)) / (5 * np.sqrt(solution_length))
+        self.eta_sigma: float = (3 + np.log(solution_length)) / (5 * np.sqrt(solution_length))
         
         # Initialize center (mu)
         if center is None:
-            self.center = np.zeros(solution_length, dtype=np.float32)
+            self.center: np.ndarray = np.zeros(solution_length, dtype=np.float32)
         else:
-            self.center = np.array(center, dtype=np.float32)
+            self.center: np.ndarray = np.array(center, dtype=np.float32)
             
         # Initialize std deviation (sigma)
         if sigma is None:
-            self.sigma = np.ones(solution_length, dtype=np.float32) * alpha
+            self.sigma: np.ndarray = np.ones(solution_length, dtype=np.float32) * alpha
         else:
-            self.sigma = np.array(sigma, dtype=np.float32) * alpha
+            self.sigma: np.ndarray = np.array(sigma, dtype=np.float32) * alpha
             
         # Precalculate utility weights
-        self.utility_weights = self._get_weight_vector()
+        self.utility_weights: np.ndarray = self._get_weight_vector()
         
         # Storage for current generation
-        self.gaussians = np.zeros((self.population_count, solution_length), dtype=np.float32)
-        self.solutions = np.zeros((self.population_count, solution_length), dtype=np.float32)
+        self.gaussians: np.ndarray = np.zeros((self.population_count, solution_length), dtype=np.float32)
+        self.solutions: np.ndarray = np.zeros((self.population_count, solution_length), dtype=np.float32)
     
-    def _get_weight_vector(self):
+    def _get_weight_vector(self) -> np.ndarray:
         """Calculate utility weights for ranking.
         
         Returns:
@@ -100,7 +103,7 @@ class SNES(Optimizer):
         
         return weights
     
-    def ask(self):
+    def ask(self) -> np.ndarray:
         """Generate a new batch of solutions to evaluate.
         
         Returns:
@@ -115,7 +118,7 @@ class SNES(Optimizer):
             
         return self.solutions
     
-    def tell(self, fitnesses, tolerance=1e-6):
+    def tell(self, fitnesses: Sequence[float], tolerance: float = 1e-6) -> float:
         """Update parameters based on fitness values (vectorized version).
         
         Args:
@@ -155,7 +158,7 @@ class SNES(Optimizer):
             self.previous_best = best_fitness
             return float('inf')
     
-    def get_stats(self):
+    def get_stats(self) -> dict[str, Any]:
         """Return current optimizer statistics.
         
         Returns:
@@ -171,7 +174,7 @@ class SNES(Optimizer):
             "best_fitness": float(self.previous_best) if hasattr(self, 'previous_best') else None
         }
     
-    def save_state(self, filename):
+    def save_state(self, filename: str) -> None:
         """Save optimizer state to file.
         
         Args:
@@ -187,7 +190,7 @@ class SNES(Optimizer):
         )
     
     @classmethod
-    def load_state(cls, filename):
+    def load_state(cls, filename: str) -> 'SNES':
         """Load optimizer state from file.
         
         Args:
@@ -207,7 +210,7 @@ class SNES(Optimizer):
             optimizer.previous_best = float(data['previous_best'])
         return optimizer
     
-    def get_best_solution(self):
+    def get_best_solution(self) -> np.ndarray:
         """Return current best estimate (center).
         
         Returns:
@@ -215,7 +218,7 @@ class SNES(Optimizer):
         """
         return self.center.copy()
         
-    def reset(self, center=None, sigma=None):
+    def reset(self, center: Optional[np.ndarray] = None, sigma: Optional[np.ndarray] = None) -> None:
         """Reset the optimizer with optional new center and sigma.
         
         Args:

@@ -6,18 +6,19 @@ a full covariance matrix instead of just diagonal variances like SNES.
 """
 
 import numpy as np
+from typing import Optional, Sequence, Any
 from pyevo.optimizers.base import Optimizer
 
 class CMA_ES(Optimizer):
     """Covariance Matrix Adaptation Evolution Strategy (CMA-ES)."""
     
     def __init__(self, 
-                solution_length,
-                population_count=None,
-                alpha=0.1,
-                center=None,
-                sigma=None,
-                random_seed=None):
+                solution_length: int,
+                population_count: Optional[int] = None,
+                alpha: float = 0.1,
+                center: Optional[np.ndarray] = None,
+                sigma: Optional[np.ndarray] = None,
+                random_seed: Optional[int] = None):
         """
         Initialize the CMA-ES optimizer.
         
@@ -91,7 +92,7 @@ class CMA_ES(Optimizer):
         # Generation counter
         self.generation = 0
         
-    def ask(self):
+    def ask(self) -> np.ndarray:
         """Generate a new batch of solutions to evaluate."""
         # Generate Gaussian samples
         for i in range(self.population_count):
@@ -101,7 +102,7 @@ class CMA_ES(Optimizer):
             
         return self.solutions
     
-    def tell(self, fitnesses, tolerance=1e-6):
+    def tell(self, fitnesses: Sequence[float], tolerance: float = 1e-6) -> float:
         """Update parameters based on fitness values."""
         if len(fitnesses) != self.population_count:
             raise ValueError("Mismatch between population size and fitness values")
@@ -187,13 +188,13 @@ class CMA_ES(Optimizer):
             self.B = np.eye(self.solution_length, dtype=np.float32)
             self.D = np.ones(self.solution_length, dtype=np.float32)
     
-    def get_best_solution(self):
+    def get_best_solution(self) -> np.ndarray:
         """Return current best estimate."""
         if hasattr(self, 'best_solution'):
             return self.best_solution.copy()
         return self.center.copy()
     
-    def get_stats(self):
+    def get_stats(self) -> dict:
         """Return current optimizer statistics."""
         return {
             "center_mean": float(np.mean(self.center)),
@@ -208,7 +209,7 @@ class CMA_ES(Optimizer):
             "best_fitness": float(self.previous_best) if hasattr(self, 'previous_best') else None
         }
     
-    def save_state(self, filename):
+    def save_state(self, filename: str):
         """Save optimizer state to file."""
         np.savez(
             filename, 
@@ -226,7 +227,7 @@ class CMA_ES(Optimizer):
             best_solution=getattr(self, 'best_solution', self.center.copy())
         )
     
-    def reset(self, center=None, sigma=None):
+    def reset(self, center: Optional[np.ndarray] = None, sigma: Optional[float] = None):
         """Reset the optimizer with optional new center and sigma."""
         if center is not None:
             self.center = np.array(center, dtype=np.float32)
@@ -243,7 +244,7 @@ class CMA_ES(Optimizer):
         self.generation = 0
         
     @classmethod
-    def load_state(cls, filename):
+    def load_state(cls, filename: str) -> 'CMA_ES':
         """Load optimizer state from file."""
         data = np.load(filename)
         optimizer = cls(

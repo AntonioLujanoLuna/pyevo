@@ -11,7 +11,7 @@ import os
 import numpy as np
 import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
-from typing import Callable, Dict, List, Tuple, Optional, Any, Union, TypeVar
+from typing import Callable, Dict, List, Tuple, Optional, Any, Union, TypeVar, Sequence
 
 # Import Optimizer type only for type annotations while avoiding circular imports
 from typing import TYPE_CHECKING
@@ -27,12 +27,13 @@ try:
     HAS_CUPY = True
 except ImportError:
     HAS_CUPY = False
+    cp = None  # type: ignore
     
 def is_gpu_available() -> bool:
     """Check if GPU acceleration is available via CuPy."""
     return HAS_CUPY
 
-def get_gpu_memory_info():
+def get_gpu_memory_info() -> Optional[Tuple[int, int]]:
     """
     Get GPU memory usage information.
     
@@ -48,7 +49,7 @@ def get_gpu_memory_info():
     except Exception:
         return None
 
-def clear_gpu_memory():
+def clear_gpu_memory() -> bool:
     """
     Release all unused GPU memory.
     
@@ -64,7 +65,7 @@ def clear_gpu_memory():
     except Exception:
         return False
 
-def get_array_module(use_gpu=False):
+def get_array_module(use_gpu: bool = False) -> Any:
     """
     Get the appropriate array module (NumPy or CuPy) based on availability and preference.
     
@@ -78,7 +79,7 @@ def get_array_module(use_gpu=False):
         return cp
     return np
 
-def to_device(array, use_gpu=False):
+def to_device(array: Any, use_gpu: bool = False) -> Any:
     """
     Move array to the appropriate device (CPU or GPU).
     
@@ -98,7 +99,7 @@ def to_device(array, use_gpu=False):
             return cp.asnumpy(array)
         return array
     
-def estimate_memory_usage(solutions, element_size=4):
+def estimate_memory_usage(solutions: Any, element_size: int = 4) -> int:
     """
     Estimate memory usage for processing solutions.
     
@@ -119,7 +120,13 @@ def estimate_memory_usage(solutions, element_size=4):
         # Fallback: assume a list or sequence
         return len(solutions) * len(solutions[0]) * element_size
 
-def batch_process(fitness_func, solutions, batch_size=None, use_gpu=False, **kwargs):
+def batch_process(
+    fitness_func: Callable[[Any], Any],
+    solutions: Any,
+    batch_size: Optional[int] = None,
+    use_gpu: bool = False,
+    **kwargs: Any
+) -> Any:
     """
     Process solutions in batches for better performance, especially on GPU.
     
@@ -184,7 +191,12 @@ def batch_process(fitness_func, solutions, batch_size=None, use_gpu=False, **kwa
             fitnesses = None
             clear_gpu_memory()
 
-def parallel_evaluate(fitness_func, solutions, max_workers=None, **kwargs):
+def parallel_evaluate(
+    fitness_func: Callable[[Any], Any],
+    solutions: Any,
+    max_workers: Optional[int] = None,
+    **kwargs: Any
+) -> List[Any]:
     """
     Evaluate solutions in parallel using multiple CPU cores.
     
@@ -212,18 +224,18 @@ def parallel_evaluate(fitness_func, solutions, max_workers=None, **kwargs):
     return fitnesses
 
 def optimize_with_acceleration(
-    optimizer: 'Optimizer', 
-    fitness_func: Callable[[ArrayLike], Union[float, ArrayLike]], 
-    max_iterations: int = 100, 
-    use_gpu: bool = False, 
-    use_parallel: bool = False, 
-    max_workers: Optional[int] = None, 
-    batch_size: Optional[int] = None, 
+    optimizer: 'Optimizer',
+    fitness_func: Callable[[Any], Any],
+    max_iterations: int = 100,
+    use_gpu: bool = False,
+    use_parallel: bool = False,
+    max_workers: Optional[int] = None,
+    batch_size: Optional[int] = None,
     callback: Optional[Callable[['Optimizer', int, float], None]] = None,
     checkpoint_freq: Optional[int] = None,
     checkpoint_path: Optional[str] = None,
     **kwargs: Any
-) -> Tuple[ArrayLike, float, Dict[str, List]]:
+) -> Tuple[Any, float, Dict[str, List[Any]]]:
     """
     Run optimization with GPU acceleration and/or parallel processing.
     
@@ -243,7 +255,7 @@ def optimize_with_acceleration(
     Returns:
         tuple: (best_solution, best_fitness, stats)
     """
-    stats: Dict[str, List] = {
+    stats: Dict[str, List[Any]] = {
         'iterations': [],
         'best_fitness': [],
         'improvement': [],
@@ -312,7 +324,7 @@ def optimize_with_acceleration(
     
     return optimizer.get_best_solution(), stats['best_fitness'][-1], stats
 
-def save_checkpoint(optimizer, session_info, filepath):
+def save_checkpoint(optimizer: 'Optimizer', session_info: dict, filepath: str) -> bool:
     """
     Save optimizer state and session info in a single file.
     
@@ -346,7 +358,7 @@ def save_checkpoint(optimizer, session_info, filepath):
         print(f"Error saving checkpoint: {e}")
         return False
 
-def load_checkpoint(filepath):
+def load_checkpoint(filepath: str) -> Tuple[Optional[dict], Optional[dict]]:
     """
     Load optimizer state and session info from a checkpoint file.
     

@@ -16,6 +16,7 @@ import os
 import json
 from pathlib import Path
 import numpy as np
+from typing import Any, Callable, Optional, Tuple
 
 from pyevo.utils.acceleration import save_checkpoint, load_checkpoint
 
@@ -31,7 +32,7 @@ class InteractiveOptimizer:
     - Visualization support
     """
     
-    def __init__(self, optimizer, fitness_function, max_iterations=None, checkpoint_dir=None):
+    def __init__(self, optimizer: Any, fitness_function: Callable[[Any], float], max_iterations: Optional[int] = None, checkpoint_dir: Optional[str] = None) -> None:
         """
         Initialize the interactive optimizer.
         
@@ -73,7 +74,7 @@ class InteractiveOptimizer:
         # Command processing thread
         self.command_thread = None
         
-    def start(self):
+    def start(self) -> Tuple[Any, float]:
         """
         Start the optimization process with interactive control.
         
@@ -134,7 +135,7 @@ class InteractiveOptimizer:
         
         return self.optimizer.get_best_solution(), self.best_fitness
     
-    def _get_session_info(self):
+    def _get_session_info(self) -> dict:
         """Get the current session information for checkpointing."""
         return {
             "current_iteration": self.current_iteration,
@@ -146,7 +147,7 @@ class InteractiveOptimizer:
             "alpha_adjustment": float(self.alpha_adjustment)
         }
     
-    def _run_iteration(self):
+    def _run_iteration(self) -> float:
         """Run a single iteration of the optimization."""
         # Generate solutions
         solutions = self.optimizer.ask()
@@ -183,7 +184,7 @@ class InteractiveOptimizer:
             
         return improvement
     
-    def _process_commands(self):
+    def _process_commands(self) -> None:
         """Process user commands in a separate thread."""
         while self.running:
             try:
@@ -193,7 +194,7 @@ class InteractiveOptimizer:
                 # Handle EOFError when input() is interrupted
                 pass
     
-    def _handle_command(self, command):
+    def _handle_command(self, command: str) -> None:
         """Handle user commands."""
         command = command.lower().strip()
         
@@ -233,12 +234,12 @@ class InteractiveOptimizer:
         else:
             print("Unknown command. Type 'help' for available commands.")
     
-    def _print_progress(self):
+    def _print_progress(self) -> None:
         """Print progress information."""
         elapsed = time.time() - self.start_time
         print(f"Iteration {self.current_iteration}: Best fitness = {self.best_fitness:.6f} [{elapsed:.1f}s]")
     
-    def _print_stats(self):
+    def _print_stats(self) -> None:
         """Print detailed statistics about the optimization."""
         print("\n--- Optimization Statistics ---")
         print(f"Iterations: {self.current_iteration}")
@@ -255,7 +256,7 @@ class InteractiveOptimizer:
         
         print("----------------------------")
     
-    def _print_params(self):
+    def _print_params(self) -> None:
         """Print current optimizer parameters."""
         print("\n--- Optimizer Parameters ---")
         for key, value in self.optimizer.__dict__.items():
@@ -265,7 +266,7 @@ class InteractiveOptimizer:
         print(f"alpha_adjustment: {self.alpha_adjustment}")
         print("---------------------------")
     
-    def _save_checkpoint(self):
+    def _save_checkpoint(self) -> Optional[str]:
         """Save current optimizer state and session to a checkpoint file."""
         try:
             # Create checkpoint directory if it doesn't exist
@@ -289,7 +290,7 @@ class InteractiveOptimizer:
             print(f"Error saving checkpoint: {e}")
             return None
     
-    def _print_help(self):
+    def _print_help(self) -> None:
         """Print help information."""
         print("\n--- Available Commands ---")
         print("pause:         Pause optimization")
@@ -303,7 +304,7 @@ class InteractiveOptimizer:
         print("------------------------")
     
     @classmethod
-    def load_session(cls, checkpoint_path, fitness_function):
+    def load_session(cls, checkpoint_path: str, fitness_function: Callable[[Any], float]) -> 'InteractiveOptimizer':
         """
         Load optimizer and session from a checkpoint file.
         

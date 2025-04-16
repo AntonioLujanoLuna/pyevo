@@ -7,6 +7,7 @@ to generate new candidate solutions, and performs well on multimodal problems.
 """
 
 import numpy as np
+from typing import Optional, Sequence, Any
 from pyevo.optimizers.base import Optimizer
 
 class DE(Optimizer):
@@ -18,13 +19,13 @@ class DE(Optimizer):
     """
     
     def __init__(self, 
-                 solution_length,
-                 population_count=None,
-                 f=0.5,
-                 cr=0.7,
-                 strategy="best/1/bin",
-                 bounds=None,
-                 random_seed=None):
+                 solution_length: int,
+                 population_count: Optional[int] = None,
+                 f: float = 0.5,
+                 cr: float = 0.7,
+                 strategy: str = "best/1/bin",
+                 bounds: Optional[np.ndarray] = None,
+                 random_seed: Optional[int] = None):
         """
         Initialize the Differential Evolution optimizer.
         
@@ -70,7 +71,7 @@ class DE(Optimizer):
         self.best_idx = 0
         self.generation = 0
         
-    def initialize_population(self):
+    def initialize_population(self) -> None:
         """Initialize the population randomly within bounds."""
         if self.bounds is None:
             # No bounds, initialize around zero with standard deviation 1.0
@@ -81,7 +82,7 @@ class DE(Optimizer):
             self.population = lower + self.rng.random((self.population_count, self.solution_length)) * (upper - lower)
             self.population = self.population.astype(np.float32)
     
-    def ask(self):
+    def ask(self) -> np.ndarray:
         """Generate trial solutions for evaluation.
         
         Returns:
@@ -95,14 +96,14 @@ class DE(Optimizer):
         # Here we just return the current population
         return self.population
     
-    def _enforce_bounds(self, vectors):
+    def _enforce_bounds(self, vectors: np.ndarray) -> np.ndarray:
         """Enforce solution bounds if specified."""
         if self.bounds is not None:
             lower, upper = self.bounds
             np.clip(vectors, lower, upper, out=vectors)
         return vectors
     
-    def tell(self, fitnesses, tolerance=1e-6):
+    def tell(self, fitnesses: Sequence[float], tolerance: float = 1e-6) -> float:
         """Update population based on fitness values.
         
         Args:
@@ -184,7 +185,7 @@ class DE(Optimizer):
         
         return improvement
     
-    def _selection(self, trial_fitnesses):
+    def _selection(self, trial_fitnesses: Sequence[float]) -> None:
         """Select between current population and trial vectors based on fitness."""
         # Compare each individual with its corresponding trial vector
         for i in range(self.population_count):
@@ -197,7 +198,7 @@ class DE(Optimizer):
                 if trial_fitnesses[i] > self.fitnesses[self.best_idx]:
                     self.best_idx = i
     
-    def get_best_solution(self):
+    def get_best_solution(self) -> np.ndarray:
         """Return current best solution.
         
         Returns:
@@ -207,7 +208,7 @@ class DE(Optimizer):
             return self.population[self.best_idx].copy()
         return self.population[0].copy()
     
-    def get_stats(self):
+    def get_stats(self) -> dict[str, Any]:
         """Return current optimizer statistics.
         
         Returns:
@@ -225,7 +226,7 @@ class DE(Optimizer):
             "best_fitness": float(self.previous_best) if hasattr(self, 'previous_best') else None
         }
     
-    def save_state(self, filename):
+    def save_state(self, filename: str) -> None:
         """Save optimizer state to file.
         
         Args:
@@ -247,7 +248,7 @@ class DE(Optimizer):
         )
     
     @classmethod
-    def load_state(cls, filename):
+    def load_state(cls, filename: str) -> 'DE':
         """Load optimizer state from file.
         
         Args:
@@ -279,7 +280,7 @@ class DE(Optimizer):
             
         return optimizer
     
-    def reset(self, population=None, f=None, cr=None):
+    def reset(self, population: Optional[np.ndarray] = None, f: Optional[float] = None, cr: Optional[float] = None) -> None:
         """Reset the optimizer.
         
         Args:

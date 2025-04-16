@@ -6,6 +6,7 @@ including SSIM calculation and convolution operations.
 """
 
 import numpy as np
+from typing import Tuple, Callable, Any
 from PIL import Image
 
 # Try to import scipy for optimized versions
@@ -18,7 +19,7 @@ except ImportError:
     HAS_SCIPY = False
     print("SciPy/scikit-image not found - using pure NumPy implementation")
 
-def get_optimal_image_functions():
+def get_optimal_image_functions() -> Tuple[Callable[..., float], Callable[..., np.ndarray]]:
     """
     Get the optimal image processing functions based on available packages.
     
@@ -30,7 +31,15 @@ def get_optimal_image_functions():
     else:
         return calculate_ssim, convolve2d
 
-def calculate_ssim(img1, img2, win_size=11, k1=0.01, k2=0.03, L=255, downsample=True):
+def calculate_ssim(
+    img1: np.ndarray,
+    img2: np.ndarray,
+    win_size: int = 11,
+    k1: float = 0.01,
+    k2: float = 0.03,
+    L: int = 255,
+    downsample: bool = True
+) -> float:
     """
     Calculate Structural Similarity Index (SSIM) between two images.
     Pure NumPy implementation with no external dependencies.
@@ -105,7 +114,7 @@ def calculate_ssim(img1, img2, win_size=11, k1=0.01, k2=0.03, L=255, downsample=
     # Return mean SSIM
     return float(np.mean(ssim_map))
 
-def scipy_ssim(img1, img2, **kwargs):
+def scipy_ssim(img1: np.ndarray, img2: np.ndarray, **kwargs: Any) -> float:
     """
     Calculate SSIM using scikit-image implementation (faster).
     
@@ -127,7 +136,7 @@ def scipy_ssim(img1, img2, **kwargs):
     else:
         return skimage_ssim(img1, img2, **kwargs)
 
-def scipy_convolve2d(img, kernel):
+def scipy_convolve2d(img: np.ndarray, kernel: np.ndarray) -> np.ndarray:
     """
     Fast 2D convolution using SciPy.
     
@@ -145,7 +154,7 @@ def scipy_convolve2d(img, kernel):
     kernel_flipped = kernel[::-1, ::-1]
     return scipy_convolve(img, kernel_flipped, mode='reflect')
 
-def convolve2d(img, kernel):
+def convolve2d(img: np.ndarray, kernel: np.ndarray) -> np.ndarray:
     """
     Optimized 2D convolution using only NumPy.
     

@@ -6,21 +6,22 @@ social behavior of birds flocking or fish schooling.
 """
 
 import numpy as np
+from typing import Optional, Sequence, Any
 from pyevo.optimizers.base import Optimizer
 
 class PSO(Optimizer):
     """Particle Swarm Optimization (PSO)."""
     
     def __init__(self, 
-                solution_length,
-                population_count=None,
-                alpha=None,  # Not used but kept for interface compatibility
-                center=None,
-                sigma=None,
-                random_seed=None,
-                omega=0.7,    # Inertia weight
-                phi_p=1.5,    # Cognitive parameter
-                phi_g=1.5):   # Social parameter
+                solution_length: int,
+                population_count: Optional[int] = None,
+                alpha: Optional[float] = None,  # Not used but kept for interface compatibility
+                center: Optional[Sequence[float]] = None,
+                sigma: Optional[Sequence[float]] = None,
+                random_seed: Optional[int] = None,
+                omega: float = 0.7,    # Inertia weight
+                phi_p: float = 1.5,    # Cognitive parameter
+                phi_g: float = 1.5):   # Social parameter
         """
         Initialize the PSO optimizer.
         
@@ -81,11 +82,11 @@ class PSO(Optimizer):
             self.velocities[i] = self.rng.uniform(-0.5, 0.5, solution_length) * self.sigma
             self.personal_best_positions[i] = self.positions[i].copy()
     
-    def ask(self):
+    def ask(self) -> np.ndarray:
         """Generate/return current particle positions for evaluation."""
         return self.positions.copy()
     
-    def tell(self, fitnesses, tolerance=1e-6):
+    def tell(self, fitnesses: Sequence[float], tolerance: float = 1e-6) -> float:
         """Update particle positions based on fitness values."""
         if len(fitnesses) != self.population_count:
             raise ValueError("Mismatch between population size and fitness values")
@@ -130,11 +131,11 @@ class PSO(Optimizer):
         
         return improvement
     
-    def get_best_solution(self):
+    def get_best_solution(self) -> np.ndarray:
         """Return current best solution."""
         return self.global_best_position.copy()
     
-    def get_stats(self):
+    def get_stats(self) -> dict:
         """Return current optimizer statistics."""
         return {
             "global_best_fitness": float(self.global_best_fitness),
@@ -144,7 +145,7 @@ class PSO(Optimizer):
             "velocity_mean": float(np.mean(self.velocities))
         }
     
-    def save_state(self, filename):
+    def save_state(self, filename: str):
         """Save optimizer state to file."""
         np.savez(
             filename, 
@@ -158,7 +159,7 @@ class PSO(Optimizer):
             population_count=self.population_count
         )
     
-    def reset(self, center=None, sigma=None):
+    def reset(self, center: Optional[Sequence[float]] = None, sigma: Optional[Sequence[float]] = None):
         """Reset the optimizer with optional new center and sigma."""
         if center is not None:
             self.center = np.array(center, dtype=np.float32)

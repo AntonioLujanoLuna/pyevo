@@ -8,6 +8,7 @@ increase the likelihood of sampling high-performing solutions.
 """
 
 import numpy as np
+from typing import Optional, Sequence, Any
 from pyevo.optimizers.base import Optimizer
 
 class CrossEntropyMethod(Optimizer):
@@ -19,15 +20,15 @@ class CrossEntropyMethod(Optimizer):
     """
     
     def __init__(self, 
-                 solution_length,
-                 population_count=None,
-                 elite_ratio=0.2,
-                 alpha=0.7,
-                 mean=None,
-                 sigma=None,
-                 bounds=None,
-                 diagonal_cov=False,
-                 random_seed=None):
+                 solution_length: int,
+                 population_count: Optional[int] = None,
+                 elite_ratio: float = 0.2,
+                 alpha: float = 0.7,
+                 mean: Optional[np.ndarray] = None,
+                 sigma: Optional[np.ndarray] = None,
+                 bounds: Optional[np.ndarray] = None,
+                 diagonal_cov: bool = False,
+                 random_seed: Optional[int] = None) -> None:
         """
         Initialize the Cross-Entropy Method optimizer.
         
@@ -105,7 +106,7 @@ class CrossEntropyMethod(Optimizer):
         # Generation counter
         self.generation = 0
         
-    def ask(self):
+    def ask(self) -> np.ndarray:
         """Generate solutions for evaluation.
         
         Returns:
@@ -139,7 +140,7 @@ class CrossEntropyMethod(Optimizer):
             
         return self.solutions
     
-    def tell(self, fitnesses, tolerance=1e-6):
+    def tell(self, fitnesses: Sequence[float], tolerance: float = 1e-6) -> float:
         """Update distribution parameters based on fitness values.
         
         Args:
@@ -202,7 +203,7 @@ class CrossEntropyMethod(Optimizer):
         
         return improvement
     
-    def get_best_solution(self):
+    def get_best_solution(self) -> np.ndarray:
         """Return current best solution.
         
         Returns:
@@ -212,7 +213,7 @@ class CrossEntropyMethod(Optimizer):
             return self.best_solution.copy()
         return self.mean.copy()
     
-    def get_stats(self):
+    def get_stats(self) -> dict[str, Any]:
         """Return current optimizer statistics.
         
         Returns:
@@ -226,7 +227,7 @@ class CrossEntropyMethod(Optimizer):
             "best_fitness": float(self.previous_best) if hasattr(self, 'previous_best') else None
         }
     
-    def save_state(self, filename):
+    def save_state(self, filename: str) -> None:
         """Save optimizer state to file.
         
         Args:
@@ -249,7 +250,7 @@ class CrossEntropyMethod(Optimizer):
         )
     
     @classmethod
-    def load_state(cls, filename):
+    def load_state(cls, filename: str) -> 'CrossEntropyMethod':
         """Load optimizer state from file.
         
         Args:
@@ -284,7 +285,7 @@ class CrossEntropyMethod(Optimizer):
             
         return optimizer
     
-    def reset(self, mean=None, cov=None, alpha=None):
+    def reset(self, mean: Optional[np.ndarray] = None, cov: Optional[np.ndarray] = None, alpha: Optional[float] = None) -> None:
         """Reset the optimizer.
         
         Args:

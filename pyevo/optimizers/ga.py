@@ -8,6 +8,7 @@ but also works for continuous domains.
 """
 
 import numpy as np
+from typing import Optional, Sequence, Any, Tuple
 from pyevo.optimizers.base import Optimizer
 
 class GeneticAlgorithm(Optimizer):
@@ -18,17 +19,17 @@ class GeneticAlgorithm(Optimizer):
     """
     
     def __init__(self, 
-                 solution_length,
-                 population_count=None,
-                 elite_count=None,
-                 crossover_prob=0.7,
-                 mutation_prob=0.1,
-                 mutation_strength=0.1,
-                 selection_method="tournament",
-                 tournament_size=3,
-                 bounds=None,
-                 discrete=False,
-                 random_seed=None):
+                 solution_length: int,
+                 population_count: Optional[int] = None,
+                 elite_count: Optional[int] = None,
+                 crossover_prob: float = 0.7,
+                 mutation_prob: float = 0.1,
+                 mutation_strength: float = 0.1,
+                 selection_method: str = "tournament",
+                 tournament_size: int = 3,
+                 bounds: Optional[Sequence[Sequence[float]]] = None,
+                 discrete: bool = False,
+                 random_seed: Optional[int] = None) -> None:
         """
         Initialize the Genetic Algorithm optimizer.
         
@@ -85,7 +86,7 @@ class GeneticAlgorithm(Optimizer):
         # Generation counter
         self.generation = 0
         
-    def initialize_population(self):
+    def initialize_population(self) -> None:
         """Initialize the population randomly within bounds."""
         if self.bounds is None:
             # No bounds, initialize around zero with standard deviation 1.0
@@ -100,7 +101,7 @@ class GeneticAlgorithm(Optimizer):
         if self.discrete and self.bounds is not None:
             self.population = np.floor(self.population).astype(np.int32).astype(np.float32)
     
-    def ask(self):
+    def ask(self) -> np.ndarray:
         """Generate solutions for evaluation.
         
         Returns:
@@ -108,7 +109,7 @@ class GeneticAlgorithm(Optimizer):
         """
         return self.population
     
-    def _tournament_selection(self, fitnesses, k=3):
+    def _tournament_selection(self, fitnesses: Sequence[float], k: int = 3) -> int:
         """Tournament selection of individuals.
         
         Args:
@@ -124,7 +125,7 @@ class GeneticAlgorithm(Optimizer):
         # Return the index of the best individual
         return selected_indices[np.argmax(fitnesses[selected_indices])]
     
-    def _roulette_selection(self, fitnesses):
+    def _roulette_selection(self, fitnesses: Sequence[float]) -> int:
         """Roulette wheel selection of individuals.
         
         Args:
@@ -145,7 +146,7 @@ class GeneticAlgorithm(Optimizer):
         # Select an individual based on fitness proportionate selection
         return self.rng.choice(self.population_count, p=probs)
     
-    def _crossover(self, parent1, parent2):
+    def _crossover(self, parent1: Sequence[float], parent2: Sequence[float]) -> Tuple[Sequence[float], Sequence[float]]:
         """Perform uniform crossover between two parents.
         
         Args:
@@ -169,7 +170,7 @@ class GeneticAlgorithm(Optimizer):
             # Return copies of parents if no crossover
             return parent1.copy(), parent2.copy()
     
-    def _mutation(self, individual):
+    def _mutation(self, individual: Sequence[float]) -> Sequence[float]:
         """Perform mutation on an individual.
         
         Args:
@@ -200,7 +201,7 @@ class GeneticAlgorithm(Optimizer):
                 
         return individual
     
-    def tell(self, fitnesses, tolerance=1e-6):
+    def tell(self, fitnesses: Sequence[float], tolerance: float = 1e-6) -> float:
         """Update population based on fitness values.
         
         Args:
@@ -302,7 +303,7 @@ class GeneticAlgorithm(Optimizer):
             "best_fitness": float(self.previous_best) if hasattr(self, 'previous_best') else None
         }
     
-    def save_state(self, filename):
+    def save_state(self, filename: str):
         """Save optimizer state to file.
         
         Args:
@@ -327,7 +328,7 @@ class GeneticAlgorithm(Optimizer):
         )
     
     @classmethod
-    def load_state(cls, filename):
+    def load_state(cls, filename: str):
         """Load optimizer state from file.
         
         Args:
@@ -364,7 +365,7 @@ class GeneticAlgorithm(Optimizer):
             
         return optimizer
     
-    def reset(self, population=None, crossover_prob=None, mutation_prob=None, mutation_strength=None):
+    def reset(self, population: Optional[Sequence[Sequence[float]]] = None, crossover_prob: Optional[float] = None, mutation_prob: Optional[float] = None, mutation_strength: Optional[float] = None):
         """Reset the optimizer.
         
         Args:
