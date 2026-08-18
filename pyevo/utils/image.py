@@ -5,19 +5,43 @@ This module contains image processing functions used throughout the codebase,
 including SSIM calculation and convolution operations.
 """
 
+import logging
 import numpy as np
 from typing import Tuple, Callable, Any
-from PIL import Image
 
-# Try to import scipy for optimized versions
+logger = logging.getLogger(__name__)
+
+# Pillow is an optional dependency (``pip install pyevo[examples]``). It is
+# imported lazily by _require_pil() so that ``import pyevo`` works with numpy alone.
 try:
     from scipy.ndimage import convolve as scipy_convolve
     from skimage.metrics import structural_similarity as skimage_ssim
     HAS_SCIPY = True
-    print("SciPy/scikit-image detected - using optimized image processing")
+    logger.debug("SciPy/scikit-image detected - using optimized image processing")
 except ImportError:
+    scipy_convolve = None
+    skimage_ssim = None
     HAS_SCIPY = False
-    print("SciPy/scikit-image not found - using pure NumPy implementation")
+    logger.debug("SciPy/scikit-image not found - using pure NumPy implementation")
+
+
+def _require_pil():
+    """Import and return the Pillow Image module, with an actionable error.
+
+    Returns:
+        The ``PIL.Image`` module.
+
+    Raises:
+        ImportError: If Pillow is not installed.
+    """
+    try:
+        from PIL import Image
+    except ImportError as exc:  # pragma: no cover - depends on environment
+        raise ImportError(
+            "Pillow is required for this operation. "
+            "Install it with: pip install 'pyevo[examples]'"
+        ) from exc
+    return Image
 
 def get_optimal_image_functions() -> Tuple[Callable[..., float], Callable[..., np.ndarray]]:
     """
@@ -61,7 +85,8 @@ def calculate_ssim(
         factor = min(1, 256 / max(img1.shape[0], img1.shape[1]))
         new_size = (int(img1.shape[1] * factor), int(img1.shape[0] * factor))
         
-        # Use PIL for high-quality resizing
+        # Use PIL for high-quality resizing (optional dependency)
+        Image = _require_pil()
         img1_pil = Image.fromarray(img1)
         img2_pil = Image.fromarray(img2)
         img1_small = np.array(img1_pil.resize(new_size, Image.LANCZOS))
@@ -129,12 +154,12 @@ def scipy_ssim(img1: np.ndarray, img2: np.ndarray, **kwargs: Any) -> float:
     if not HAS_SCIPY:
         return calculate_ssim(img1, img2)
     
-    # Handle multichannel images
+    # Handle multichannel images. ``multichannel`` was deprecated in
+    # scikit-image 0.19 and removed in 0.23 in favour of ``channel_axis``.
     if img1.ndim == 3 and img1.shape[2] == 3:
-        # skimage SSIM expects multichannel parameter for color images
-        return skimage_ssim(img1, img2, multichannel=True, **kwargs)
-    else:
-        return skimage_ssim(img1, img2, **kwargs)
+        kwargs.setdefault("channel_axis", -1)
+    kwargs.setdefault("data_range", float(np.max(img1)) - float(np.min(img1)))
+    return float(skimage_ssim(img1, img2, **kwargs))
 
 def scipy_convolve2d(img: np.ndarray, kernel: np.ndarray) -> np.ndarray:
     """

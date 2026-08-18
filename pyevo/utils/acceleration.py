@@ -8,10 +8,15 @@ This module provides acceleration capabilities for PyEvo optimizers:
 """
 
 import os
+import logging
 import numpy as np
 import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
+from functools import partial
+from pickle import PicklingError
 from typing import Callable, Dict, List, Tuple, Optional, Any, Union, TypeVar, Sequence
+
+logger = logging.getLogger(__name__)
 
 # Import Optimizer type only for type annotations while avoiding circular imports
 from typing import TYPE_CHECKING
@@ -191,6 +196,19 @@ def batch_process(
             fitnesses = None
             clear_gpu_memory()
 
+def _evaluate_one(fitness_func: Callable[..., Any], kwargs: Dict[str, Any], solution: Any) -> Any:
+    """Evaluate a single solution. Module-level so it can be pickled by workers.
+
+    Args:
+        fitness_func: Function to evaluate fitness of a single solution
+        kwargs: Extra keyword arguments forwarded to fitness_func
+        solution: The solution to evaluate
+
+    Returns:
+        The fitness value for the solution
+    """
+    return fitness_func(solution, **kwargs)
+
 def parallel_evaluate(
     fitness_func: Callable[[Any], Any],
     solutions: Any,
@@ -211,17 +229,34 @@ def parallel_evaluate(
     """
     # Auto-configure number of workers if not provided
     if max_workers is None:
-        max_workers = max(1, os.cpu_count() - 1)  # Leave one core free
-    
-    # Create a wrapper that passes kwargs to fitness_func
-    def evaluate_solution(solution):
-        return fitness_func(solution, **kwargs)
-    
-    # Use ProcessPoolExecutor for parallel evaluation
-    with ProcessPoolExecutor(max_workers=max_workers) as executor:
-        fitnesses = list(executor.map(evaluate_solution, solutions))
-    
-    return fitnesses
+        max_workers = max(1, (os.cpu_count() or 1) - 1)  # Leave one core free
+
+    solutions = list(solutions)
+    if not solutions:
+        return []
+
+    # A single worker means there is nothing to gain from paying process
+    # start-up and pickling costs, so evaluate inline.
+    if max_workers == 1:
+        return [fitness_func(solution, **kwargs) for solution in solutions]
+
+    # functools.partial over a module-level function is picklable; a closure
+    # defined in this scope is not, which is why this used to fail outright
+    # with "Can't pickle local object".
+    worker = partial(_evaluate_one, fitness_func, kwargs)
+
+    try:
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            return list(executor.map(worker, solutions))
+    except (PicklingError, AttributeError, TypeError) as exc:
+        # fitness_func itself may be unpicklable (a lambda, a closure, or a
+        # bound method of an unpicklable object). Falling back keeps the
+        # optimization running instead of taking the whole process down.
+        logger.warning(
+            "Parallel evaluation unavailable (%s); falling back to serial evaluation.",
+            exc,
+        )
+        return [fitness_func(solution, **kwargs) for solution in solutions]
 
 def optimize_with_acceleration(
     optimizer: 'Optimizer',
@@ -234,6 +269,8 @@ def optimize_with_acceleration(
     callback: Optional[Callable[['Optimizer', int, float], None]] = None,
     checkpoint_freq: Optional[int] = None,
     checkpoint_path: Optional[str] = None,
+    tolerance: float = 1e-8,
+    patience: Optional[int] = 10,
     **kwargs: Any
 ) -> Tuple[Any, float, Dict[str, List[Any]]]:
     """
@@ -250,11 +287,15 @@ def optimize_with_acceleration(
         callback: Optional callback function called after each iteration
         checkpoint_freq: How often to save checkpoints (iterations)
         checkpoint_path: Directory to save checkpoints
+        tolerance: Improvement below this counts as a stalled generation
+        patience: Stop after this many consecutive stalled generations.
+                  Pass None to disable early stopping entirely.
         **kwargs: Additional arguments to pass to fitness_func
         
     Returns:
         tuple: (best_solution, best_fitness, stats)
     """
+    stall_count = 0
     stats: Dict[str, List[Any]] = {
         'iterations': [],
         'best_fitness': [],
@@ -312,17 +353,28 @@ def optimize_with_acceleration(
         
         # Save checkpoint if requested
         if checkpoint_freq and checkpoint_path and iteration % checkpoint_freq == 0:
-            save_checkpoint(optimizer, stats, f"{checkpoint_path}_{iteration}.npz")
-        
-        # Early stopping check
-        if improvement < 1e-8:
-            break
+            if not save_checkpoint(optimizer, stats, f"{checkpoint_path}_{iteration}.npz"):
+                logger.warning("Checkpoint at iteration %d failed; continuing.", iteration)
+
+        # Early stopping: a single flat generation is normal for a stochastic
+        # optimizer, so only stop after `patience` consecutive flat generations.
+        if improvement < tolerance:
+            stall_count += 1
+            if patience is not None and stall_count >= patience:
+                logger.debug(
+                    "Early stop at iteration %d after %d generations below tolerance.",
+                    iteration, stall_count,
+                )
+                break
+        else:
+            stall_count = 0
     
     # Final checkpoint
     if checkpoint_freq and checkpoint_path:
         save_checkpoint(optimizer, stats, f"{checkpoint_path}_final.npz")
     
-    return optimizer.get_best_solution(), stats['best_fitness'][-1], stats
+    best_fitness = stats['best_fitness'][-1] if stats['best_fitness'] else float('-inf')
+    return optimizer.get_best_solution(), best_fitness, stats
 
 def save_checkpoint(optimizer: 'Optimizer', session_info: dict, filepath: str) -> bool:
     """
@@ -342,7 +394,17 @@ def save_checkpoint(optimizer: 'Optimizer', session_info: dict, filepath: str) -
         for key, value in optimizer.__dict__.items():
             if isinstance(value, (np.ndarray, int, float, bool, str, list, dict)) or value is None:
                 optimizer_state[key] = value
-        
+
+        # The RNG is not a plain type, so it would otherwise be dropped and a
+        # resumed run would not reproduce the original random stream.
+        rng = getattr(optimizer, "rng", None)
+        if isinstance(rng, np.random.RandomState):
+            optimizer_state["_rng_state"] = rng.get_state()
+
+        # Record which optimizer wrote this checkpoint so it can be restored as
+        # the right type instead of being guessed at from its attributes.
+        optimizer_state["_class_name"] = type(optimizer).__name__
+
         # Convert session info to a serializable format
         serializable_info = {}
         for key, value in session_info.items():
@@ -350,13 +412,39 @@ def save_checkpoint(optimizer: 'Optimizer', session_info: dict, filepath: str) -
                 serializable_info[key] = value
             elif isinstance(value, (int, float, bool, str, dict)):
                 serializable_info[key] = value
-        
+
         # Save to file
         np.savez(filepath, optimizer_state=optimizer_state, session_info=serializable_info)
         return True
-    except Exception as e:
-        print(f"Error saving checkpoint: {e}")
+    except (OSError, ValueError, TypeError):
+        # Narrow: real I/O or serialization failures. Logged with a traceback
+        # rather than a bare print so callers can route it, and reported via
+        # the return value so a failed checkpoint is not silently lost.
+        logger.exception("Error saving checkpoint to %s", filepath)
         return False
+
+
+def apply_checkpoint(optimizer: 'Optimizer', optimizer_state: dict) -> 'Optimizer':
+    """Restore a saved state dict onto an existing optimizer instance.
+
+    Args:
+        optimizer: Optimizer instance to restore into
+        optimizer_state: State dict returned by load_checkpoint()
+
+    Returns:
+        The same optimizer, mutated in place (returned for convenience)
+    """
+    rng_state = optimizer_state.get("_rng_state")
+    for key, value in optimizer_state.items():
+        if key in ("_rng_state", "_class_name"):
+            continue
+        setattr(optimizer, key, value)
+
+    if rng_state is not None and isinstance(getattr(optimizer, "rng", None), np.random.RandomState):
+        # np.savez round-trips the tuple as an object array; rebuild the tuple.
+        optimizer.rng.set_state(tuple(rng_state))
+
+    return optimizer
 
 def load_checkpoint(filepath: str) -> Tuple[Optional[dict], Optional[dict]]:
     """
@@ -373,6 +461,6 @@ def load_checkpoint(filepath: str) -> Tuple[Optional[dict], Optional[dict]]:
         optimizer_state = data['optimizer_state'].item()
         session_info = data['session_info'].item()
         return optimizer_state, session_info
-    except Exception as e:
-        print(f"Error loading checkpoint: {e}")
+    except (OSError, ValueError, KeyError, TypeError):
+        logger.exception("Error loading checkpoint from %s", filepath)
         return None, None 

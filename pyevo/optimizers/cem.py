@@ -9,7 +9,7 @@ increase the likelihood of sampling high-performing solutions.
 
 import numpy as np
 from typing import Optional, Sequence, Any
-from pyevo.optimizers.base import Optimizer
+from pyevo.optimizers.base import Optimizer, pack_optional, unpack_optional
 
 class CrossEntropyMethod(Optimizer):
     """Cross-Entropy Method optimizer.
@@ -34,20 +34,24 @@ class CrossEntropyMethod(Optimizer):
         
         Args:
             solution_length: Length of solution vector (dimensionality of search space)
-            population_count: Size of population (default: 10 * solution_length)
+            population_count: Size of population (default: min(10 * solution_length, 200))
             elite_ratio: Ratio of top solutions used for distribution update (default: 0.2)
             alpha: Learning rate for distribution updates (default: 0.7)
             mean: Initial mean vector (default: zeros)
             sigma: Initial standard deviation (default: ones)
             bounds: Tuple of (min, max) bounds for each dimension, shape (2, solution_length)
-            diagonal_cov: Whether to use diagonal covariance matrix (default: False)
+            diagonal_cov: Store only per-dimension variances instead of a full
+                          covariance matrix. O(n) memory instead of O(n^2),
+                          at the cost of not modelling parameter interactions.
             random_seed: Seed for random number generation
         """
         self.solution_length = solution_length
         
-        # Set population size
+        # Set population size. The uncapped 10*n default meant a 5,000-parameter
+        # problem asked for 50,000 evaluations per generation, which is
+        # unusable on exactly the high-dimensional problems this library targets.
         if population_count is None:
-            self.population_count = 10 * solution_length
+            self.population_count = min(10 * solution_length, 200)
         else:
             self.population_count = population_count
             
@@ -92,13 +96,13 @@ class CrossEntropyMethod(Optimizer):
         else:
             self.sigma = np.array(sigma, dtype=np.float32)
             
-        # Initialize covariance matrix
+        # Initialize covariance. In diagonal mode this is the length-n vector of
+        # variances; storing a full n x n matrix there defeated the entire
+        # purpose of the option (n=10k would have needed 400 MB).
         if self.diagonal_cov:
-            # Use diagonal covariance matrix (variances only)
-            self.cov = np.diag(self.sigma**2).astype(np.float32)
+            self.cov = (self.sigma ** 2).astype(np.float32)
         else:
-            # Use full covariance matrix
-            self.cov = np.diag(self.sigma**2).astype(np.float32)
+            self.cov = np.diag(self.sigma ** 2).astype(np.float32)
             
         # Storage for current solutions
         self.solutions = np.zeros((self.population_count, solution_length), dtype=np.float32)
@@ -113,9 +117,9 @@ class CrossEntropyMethod(Optimizer):
             Array of solutions with shape (population_count, solution_length)
         """
         if self.diagonal_cov:
-            # Sample using diagonal covariance (faster)
+            # Sample using diagonal covariance (faster, O(n) memory)
             noise = self.rng.randn(self.population_count, self.solution_length)
-            self.solutions = self.mean + noise * np.sqrt(np.diag(self.cov))
+            self.solutions = self.mean + noise * np.sqrt(self.cov)
         else:
             # Sample from multivariate normal distribution
             try:
@@ -124,11 +128,12 @@ class CrossEntropyMethod(Optimizer):
                 noise = self.rng.randn(self.population_count, self.solution_length)
                 self.solutions = self.mean + np.dot(noise, L.T)
             except np.linalg.LinAlgError:
-                # Fallback to diagonal if Cholesky decomposition fails
-                self.cov = np.diag(np.diag(self.cov))
-                self.solutions = self.rng.multivariate_normal(
-                    self.mean, self.cov, size=self.population_count
-                )
+                # Cholesky failed: fall back to the diagonal of C, which is
+                # always a valid (if cruder) covariance.
+                variances = np.maximum(np.diag(self.cov), 1e-20)
+                self.cov = np.diag(variances)
+                noise = self.rng.randn(self.population_count, self.solution_length)
+                self.solutions = self.mean + noise * np.sqrt(variances)
         
         # Ensure float32 type for consistency
         self.solutions = self.solutions.astype(np.float32)
@@ -181,11 +186,11 @@ class CrossEntropyMethod(Optimizer):
         
         # Update covariance matrix
         if self.diagonal_cov:
-            # Update only diagonal elements
-            old_cov = np.diag(self.cov).copy()
+            # Update the variance vector directly
             new_cov = np.var(elite_samples, axis=0)
-            updated_cov = old_cov * (1 - self.alpha) + new_cov * self.alpha
-            self.cov = np.diag(updated_cov)
+            self.cov = self.cov * (1 - self.alpha) + new_cov * self.alpha
+            # Keep variances strictly positive so sampling never degenerates.
+            self.cov = np.maximum(self.cov, 1e-20)
         else:
             # Update full covariance matrix
             old_cov = self.cov.copy()
@@ -222,8 +227,13 @@ class CrossEntropyMethod(Optimizer):
         return {
             "generation": self.generation,
             "mean_norm": float(np.linalg.norm(self.mean)),
-            "cov_trace": float(np.trace(self.cov)),
-            "cov_determinant": float(np.linalg.det(self.cov)) if not self.diagonal_cov else float(np.prod(np.diag(self.cov))),
+            "cov_trace": float(np.sum(self.cov) if self.diagonal_cov else np.trace(self.cov)),
+            # log-determinant: the raw determinant underflows to 0 in even
+            # moderate dimensions, making the statistic useless.
+            "cov_logdet": float(
+                np.sum(np.log(self.cov)) if self.diagonal_cov
+                else np.linalg.slogdet(self.cov)[1]
+            ),
             "best_fitness": float(self.previous_best) if hasattr(self, 'previous_best') else None
         }
     
@@ -233,8 +243,7 @@ class CrossEntropyMethod(Optimizer):
         Args:
             filename: Path to save the state
         """
-        np.savez(
-            filename, 
+        state = dict(
             mean=self.mean,
             cov=self.cov,
             generation=self.generation,
@@ -244,10 +253,11 @@ class CrossEntropyMethod(Optimizer):
             elite_count=self.elite_count,
             alpha=self.alpha,
             diagonal_cov=self.diagonal_cov,
-            bounds=self.bounds,
-            previous_best=getattr(self, 'previous_best', None),
-            best_solution=getattr(self, 'best_solution', None)
         )
+        pack_optional(state, 'bounds', self.bounds)
+        pack_optional(state, 'previous_best', getattr(self, 'previous_best', None))
+        pack_optional(state, 'best_solution', getattr(self, 'best_solution', None))
+        np.savez(filename, **state)
     
     @classmethod
     def load_state(cls, filename: str) -> 'CrossEntropyMethod':
@@ -259,8 +269,8 @@ class CrossEntropyMethod(Optimizer):
         Returns:
             CrossEntropyMethod instance with loaded state
         """
-        data = np.load(filename, allow_pickle=True)
-        
+        data = np.load(filename)
+
         # Create optimizer with basic parameters
         optimizer = cls(
             solution_length=int(data['solution_length']),
@@ -268,21 +278,23 @@ class CrossEntropyMethod(Optimizer):
             elite_ratio=float(data['elite_ratio']),
             alpha=float(data['alpha']),
             mean=data['mean'],
-            bounds=data['bounds'] if 'bounds' in data and data['bounds'] is not None else None,
+            bounds=unpack_optional(data, 'bounds'),
             diagonal_cov=bool(data['diagonal_cov'])
         )
-        
+
         # Load state
         optimizer.cov = data['cov']
         optimizer.generation = int(data['generation'])
         optimizer.elite_count = int(data['elite_count'])
-        
-        if 'previous_best' in data and data['previous_best'] is not None:
-            optimizer.previous_best = float(data['previous_best'])
-            
-        if 'best_solution' in data and data['best_solution'] is not None:
-            optimizer.best_solution = data['best_solution']
-            
+
+        previous_best = unpack_optional(data, 'previous_best')
+        if previous_best is not None:
+            optimizer.previous_best = float(previous_best)
+
+        best_solution = unpack_optional(data, 'best_solution')
+        if best_solution is not None:
+            optimizer.best_solution = best_solution
+
         return optimizer
     
     def reset(self, mean: Optional[np.ndarray] = None, cov: Optional[np.ndarray] = None, alpha: Optional[float] = None) -> None:

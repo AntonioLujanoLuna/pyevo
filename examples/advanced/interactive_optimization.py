@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 
 # Add parent directory to path to import modules
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from pyevo.optimizers import SNES
 from pyevo.utils.interactive import InteractiveOptimizer
 from pyevo.utils.constants import (

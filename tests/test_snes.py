@@ -50,9 +50,17 @@ class TestSNES(unittest.TestCase):
         self.assertEqual(optimizer.population_count, population_count)
         np.testing.assert_array_equal(optimizer.center, custom_center)
         
-        # Test that sigma is approximately custom_sigma * alpha
-        # Use almost_equal to handle floating point precision issues
-        np.testing.assert_allclose(optimizer.sigma, custom_sigma * alpha, rtol=1e-5)
+        # An explicitly supplied sigma is used verbatim. It used to be silently
+        # multiplied by alpha, which also shrank sigma on every load_state().
+        np.testing.assert_allclose(optimizer.sigma, custom_sigma, rtol=1e-5)
+
+        # alpha only scales the *default* sigma.
+        default_sigma_opt = SNES(
+            solution_length=solution_length, alpha=alpha, random_seed=42
+        )
+        np.testing.assert_allclose(
+            default_sigma_opt.sigma, np.full(solution_length, alpha), rtol=1e-5
+        )
 
     def test_ask(self):
         """Test the ask method."""

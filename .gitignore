@@ -77,3 +77,11 @@ venv.bak/
 # Output files
 checkpoints/
 examples/checkpoints/
+/output/
+/benchmark_results.png
+examples/output/*
+# ...but keep the demo assets the README links to.
+!examples/output/comparison_rastrigin.png
+!examples/output/comparison_rosenbrock.png
+!examples/output/image_approximated.jpg
+!examples/output/image_evolution.gif

@@ -16,7 +16,7 @@ try:
     from pyevo import SNES, CMA_ES, PSO, optimize_with_acceleration
 except ImportError:
     # If not installed, add parent directory to path
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
     from pyevo import SNES, CMA_ES, PSO, optimize_with_acceleration
 
 # Simple objective function (Rastrigin function)
