@@ -15,7 +15,7 @@ import sys
 import os
 
 # Add parent directory to path to import the SNES module and utils
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from pyevo.optimizers import SNES
 from pyevo.utils.interactive import InteractiveOptimizer
 from examples.image_approx import (

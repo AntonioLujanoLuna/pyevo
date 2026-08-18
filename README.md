@@ -28,10 +28,11 @@ This package includes multiple black-box optimization algorithms:
    - Linear time complexity with respect to problem dimensionality
 
 2. **CMA-ES (Covariance Matrix Adaptation Evolution Strategy)**
-   - Powerful, state-of-the-art evolutionary algorithm
-   - Full covariance matrix adaptation (can capture parameter interactions)
-   - Quadratic time complexity with respect to problem dimensionality
-   - Better for problems with parameter dependencies
+   - Full covariance matrix adaptation (captures parameter interactions)
+   - Implements weighted mu-recombination, rank-one and rank-mu covariance
+     updates, and cumulative step-size adaptation
+   - Quadratic time and memory in the problem dimensionality
+   - The right choice for rotated or ill-conditioned problems
 
 3. **PSO (Particle Swarm Optimization)**
    - Nature-inspired algorithm based on social behavior
@@ -91,14 +92,21 @@ pip install -e .
 ```
 
 ### Requirements
-- Python 3.6+
-- NumPy (core dependency)
-- Additional dependencies for examples and visualization (automatically installed with `pip install -e ".[examples]"`)
+- Python 3.9+
+- NumPy — the only runtime dependency. `import pyevo` and every optimizer work
+  with NumPy alone; nothing else is needed to use the library.
 
 ### Optional Dependencies
-- GPU Acceleration: `pip install cupy>=12.0.0`
-- Video Creation: `pip install "imageio[ffmpeg]"`
-- All Example Requirements: `pip install -e ".[all]"`
+Everything below is only needed for the examples and extras:
+
+| Extra | Install | Provides |
+|-------|---------|----------|
+| `examples` | `pip install -e ".[examples]"` | Pillow, matplotlib, imageio, tqdm — required to run the examples |
+| `image` | `pip install -e ".[image]"` | SciPy / scikit-image, for faster SSIM and convolution |
+| `video` | `pip install -e ".[video]"` | MP4 output via `imageio[ffmpeg]` |
+| `gpu` | `pip install -e ".[gpu]"` | CuPy for GPU acceleration (needs CUDA 12) |
+| `test` | `pip install -e ".[test]"` | pytest and pytest-cov |
+| `all` | `pip install -e ".[all]"` | Everything except the GPU extra |
 
 ## Quick Example
 
@@ -150,7 +158,7 @@ This repository includes examples demonstrating the optimization algorithms in a
 
 2. **Image Approximation**: Approximating images using rectangles
    ```bash
-   python examples/image_approx.py --image examples/resources/image.jpg --rects 200 --output-dir examples/output
+   python examples/applications/image_approximation.py --image examples/resources/image.jpg --rects 200 --output-dir examples/output
    ```
    
    This example demonstrates approximating an image using rectangles evolved with SNES. The script includes:
@@ -206,7 +214,7 @@ Here's an example of the image approximation capabilities of SNES:
 <table>
   <tr>
     <td><img src="examples/resources/image.jpg" alt="Original Image" width="400"/></td>
-    <td><img src="examples/output/examples/output/image_approximated.jpg" alt="Approximated with 750 rectangles" width="400"/></td>
+    <td><img src="examples/output/image_approximated.jpg" alt="Approximated with 750 rectangles" width="400"/></td>
   </tr>
   <tr>
     <td>Original Image</td>
@@ -219,13 +227,13 @@ Here's an example of the image approximation capabilities of SNES:
 This animation shows how the image approximation evolves over time:
 
 <p align="center">
-  <img src="examples/output/examples/output/image_evolution.gif" alt="Evolution process" width="600"/>
+  <img src="examples/output/image_evolution.gif" alt="Evolution process" width="600"/>
 </p>
 
 The approximation was generated using:
 
 ```bash
-python examples/image_approx.py --image examples/resources/image.jpg --rects 750 --max-size 384 --display-interval 5 --gif-frames 50 --population 24
+python examples/applications/image_approximation.py --image examples/resources/image.jpg --rects 750 --max-size 384 --display-interval 5 --gif-frames 50 --population 24
 ```
 
 ## Advanced Features
@@ -235,16 +243,34 @@ python examples/image_approx.py --image examples/resources/image.jpg --rects 750
 For computationally intensive fitness functions, you can use parallel processing:
 
 ```python
-from concurrent.futures import ProcessPoolExecutor
-import functools
+from pyevo import parallel_evaluate
 
-def parallel_fitness(solutions, objective_func, max_workers=None):
-    """Evaluate fitness of multiple solutions in parallel."""
-    with ProcessPoolExecutor(max_workers=max_workers) as executor:
-        return list(executor.map(objective_func, solutions))
+# Your fitness function must be importable at module level (not a lambda or a
+# nested function) so worker processes can pickle it.
+def objective(x):
+    return -sum(xi ** 2 for xi in x)
 
 # In your optimization loop
-fitnesses = parallel_fitness(solutions, objective, max_workers=4)
+solutions = optimizer.ask()
+fitnesses = parallel_evaluate(objective, solutions, max_workers=4)
+optimizer.tell(fitnesses)
+```
+
+If the fitness function cannot be pickled, `parallel_evaluate` logs a warning
+and falls back to serial evaluation rather than failing.
+
+Or let `optimize_with_acceleration` drive the whole loop:
+
+```python
+from pyevo import optimize_with_acceleration
+
+best_solution, best_fitness, stats = optimize_with_acceleration(
+    optimizer=optimizer,
+    fitness_func=objective,
+    max_iterations=100,
+    use_parallel=True,
+    max_workers=4,
+)
 ```
 
 ### Interactive Mode

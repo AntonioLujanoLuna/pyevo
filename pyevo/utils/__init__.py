@@ -22,6 +22,7 @@ from pyevo.utils.acceleration import (
     optimize_with_acceleration,
     save_checkpoint,
     load_checkpoint,
+    apply_checkpoint,
     get_gpu_memory_info,
     clear_gpu_memory,
 )
@@ -101,6 +102,7 @@ __all__ = [
     "optimize_with_acceleration",
     "save_checkpoint",
     "load_checkpoint",
+    "apply_checkpoint",
     "get_gpu_memory_info",
     "clear_gpu_memory",
     

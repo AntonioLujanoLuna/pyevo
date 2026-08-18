@@ -5,7 +5,7 @@
 
 ## Parameter Guidance
 - `population_count`
-- `mutation_factor` (F)
+- `f` (F)
 - `crossover_rate` (CR)
 - `strategy` (e.g., 'rand/1/bin', 'best/2/exp')
 

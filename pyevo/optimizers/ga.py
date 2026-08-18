@@ -9,7 +9,7 @@ but also works for continuous domains.
 
 import numpy as np
 from typing import Optional, Sequence, Any, Tuple
-from pyevo.optimizers.base import Optimizer
+from pyevo.optimizers.base import Optimizer, pack_optional, unpack_optional
 
 class GeneticAlgorithm(Optimizer):
     """Genetic Algorithm optimizer.
@@ -309,8 +309,7 @@ class GeneticAlgorithm(Optimizer):
         Args:
             filename: Path to save the state
         """
-        np.savez(
-            filename, 
+        state = dict(
             population=self.population,
             generation=self.generation,
             solution_length=self.solution_length,
@@ -321,11 +320,12 @@ class GeneticAlgorithm(Optimizer):
             mutation_strength=self.mutation_strength,
             selection_method=self.selection_method,
             tournament_size=self.tournament_size,
-            bounds=self.bounds,
             discrete=self.discrete,
-            previous_best=getattr(self, 'previous_best', None),
-            best_solution=getattr(self, 'best_solution', None)
         )
+        pack_optional(state, 'bounds', self.bounds)
+        pack_optional(state, 'previous_best', getattr(self, 'previous_best', None))
+        pack_optional(state, 'best_solution', getattr(self, 'best_solution', None))
+        np.savez(filename, **state)
     
     @classmethod
     def load_state(cls, filename: str):
@@ -337,8 +337,8 @@ class GeneticAlgorithm(Optimizer):
         Returns:
             GeneticAlgorithm instance with loaded state
         """
-        data = np.load(filename, allow_pickle=True)
-        
+        data = np.load(filename)
+
         # Create optimizer with basic parameters
         optimizer = cls(
             solution_length=int(data['solution_length']),
@@ -349,20 +349,22 @@ class GeneticAlgorithm(Optimizer):
             mutation_strength=float(data['mutation_strength']),
             selection_method=str(data['selection_method']),
             tournament_size=int(data['tournament_size']),
-            bounds=data['bounds'] if 'bounds' in data and data['bounds'] is not None else None,
+            bounds=unpack_optional(data, 'bounds'),
             discrete=bool(data['discrete'])
         )
-        
+
         # Load state
         optimizer.population = data['population']
         optimizer.generation = int(data['generation'])
-        
-        if 'previous_best' in data and data['previous_best'] is not None:
-            optimizer.previous_best = float(data['previous_best'])
-            
-        if 'best_solution' in data and data['best_solution'] is not None:
-            optimizer.best_solution = data['best_solution']
-            
+
+        previous_best = unpack_optional(data, 'previous_best')
+        if previous_best is not None:
+            optimizer.previous_best = float(previous_best)
+
+        best_solution = unpack_optional(data, 'best_solution')
+        if best_solution is not None:
+            optimizer.best_solution = best_solution
+
         return optimizer
     
     def reset(self, population: Optional[Sequence[Sequence[float]]] = None, crossover_prob: Optional[float] = None, mutation_prob: Optional[float] = None, mutation_strength: Optional[float] = None):

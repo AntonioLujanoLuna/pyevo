@@ -4,7 +4,7 @@
 *(Explanation of PSO: particles, velocity update (inertia, cognitive, social components), position update, global vs local best)*
 
 ## Parameter Guidance
-- `swarm_size`
+- `population_count`
 - `inertia_weight` (w)
 - `cognitive_coefficient` (c1)
 - `social_coefficient` (c2)

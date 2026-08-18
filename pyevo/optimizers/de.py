@@ -31,7 +31,7 @@ class DE(Optimizer):
         
         Args:
             solution_length: Length of solution vector (dimensionality of search space)
-            population_count: Size of population (default: 10 * solution_length)
+            population_count: Size of population (default: min(10 * solution_length, 100), minimum 4)
             f: Differential weight (mutation factor), typically in [0.4, 1.0]
             cr: Crossover probability, typically in [0.1, 1.0]
             strategy: DE variant to use (default: "best/1/bin")
@@ -45,6 +45,15 @@ class DE(Optimizer):
             self.population_count = min(10 * solution_length, 100)
         else:
             self.population_count = population_count
+
+        # best/1 excludes both the target and the best individual before
+        # drawing 2 donors; rand/1 excludes the target before drawing 3.
+        min_pop = 4
+        if self.population_count < min_pop:
+            raise ValueError(
+                f"DE needs population_count >= {min_pop} to form mutant vectors, "
+                f"got {self.population_count}"
+            )
             
         # Set random state
         self.rng = np.random.RandomState(random_seed)
@@ -70,6 +79,9 @@ class DE(Optimizer):
         self.fitnesses = np.zeros(self.population_count, dtype=np.float32)
         self.best_idx = 0
         self.generation = 0
+        # False until the initial population has been scored by tell().
+        self._scored = False
+        self.trial_vectors: Optional[np.ndarray] = None
         
     def initialize_population(self) -> None:
         """Initialize the population randomly within bounds."""
@@ -83,18 +95,22 @@ class DE(Optimizer):
             self.population = self.population.astype(np.float32)
     
     def ask(self) -> np.ndarray:
-        """Generate trial solutions for evaluation.
-        
+        """Generate solutions for evaluation.
+
+        On the first call this returns the initial population so it can be
+        scored. Every later call returns freshly built trial vectors, which
+        `tell` then greedily selects against their parents.
+
         Returns:
             Array of solutions to evaluate
         """
-        # In first generation, return initial population
-        if not hasattr(self, 'previous_best'):
+        if not self._scored:
+            # First generation: the population itself needs fitness values.
+            self.trial_vectors = None
             return self.population
-        
-        # For later generations, trial vectors are created in the tell method
-        # Here we just return the current population
-        return self.population
+
+        self.trial_vectors = self._generate_trials()
+        return self.trial_vectors
     
     def _enforce_bounds(self, vectors: np.ndarray) -> np.ndarray:
         """Enforce solution bounds if specified."""
@@ -115,26 +131,36 @@ class DE(Optimizer):
         """
         if len(fitnesses) != self.population_count:
             raise ValueError("Mismatch between population size and fitness values")
-        
-        # Store fitness values
-        self.fitnesses = np.array(fitnesses, dtype=np.float32)
-        
-        # Find best solution
-        curr_best_idx = np.argmax(self.fitnesses)
-        curr_best_fitness = self.fitnesses[curr_best_idx]
-        
-        # Calculate improvement
-        if hasattr(self, 'previous_best'):
-            improvement = curr_best_fitness - self.previous_best
-        else:
+
+        fitnesses = np.asarray(fitnesses, dtype=np.float32)
+
+        if not self._scored:
+            # First call: these are the fitnesses of the initial population.
+            self.fitnesses = fitnesses
+            self._scored = True
             improvement = float('inf')
-            
-        self.previous_best = curr_best_fitness
-        self.best_idx = curr_best_idx
-        
-        # Create next generation
+        else:
+            # Later calls: `fitnesses` scores the trial vectors from ask().
+            # Greedy one-to-one selection - this replaces the population, which
+            # previously never happened, leaving DE a no-op across generations.
+            self._selection(fitnesses)
+            improvement = float(np.max(self.fitnesses) - self.previous_best)
+
+        self.best_idx = int(np.argmax(self.fitnesses))
+        self.previous_best = float(self.fitnesses[self.best_idx])
+        self.generation += 1
+
+        return improvement
+
+    def _generate_trials(self) -> np.ndarray:
+        """Build one trial vector per population member using the DE strategy.
+
+        Returns:
+            Array of trial vectors, shape (population_count, solution_length)
+        """
         trial_vectors = np.zeros_like(self.population)
-        
+        curr_best_idx = int(np.argmax(self.fitnesses))
+
         # Apply the selected DE strategy to create trial vectors
         if self.strategy.startswith("best"):
             # Use best individual as base vector
@@ -175,28 +201,21 @@ class DE(Optimizer):
                 trial_vectors[i] = np.where(crossover_mask, mutant, self.population[i])
         
         # Enforce bounds
-        trial_vectors = self._enforce_bounds(trial_vectors)
-        
-        # Store trial vectors for next generation
-        self.trial_vectors = trial_vectors
-        
-        # Increment generation counter
-        self.generation += 1
-        
-        return improvement
-    
-    def _selection(self, trial_fitnesses: Sequence[float]) -> None:
-        """Select between current population and trial vectors based on fitness."""
-        # Compare each individual with its corresponding trial vector
-        for i in range(self.population_count):
-            if trial_fitnesses[i] > self.fitnesses[i]:
-                # Trial vector is better, replace current individual
-                self.population[i] = self.trial_vectors[i]
-                self.fitnesses[i] = trial_fitnesses[i]
-                
-                # Update best if needed
-                if trial_fitnesses[i] > self.fitnesses[self.best_idx]:
-                    self.best_idx = i
+        return self._enforce_bounds(trial_vectors)
+
+    def _selection(self, trial_fitnesses: np.ndarray) -> None:
+        """Greedily replace parents by the trial vectors that beat them.
+
+        Args:
+            trial_fitnesses: Fitness of each trial vector, aligned with the
+                             population by index
+        """
+        if self.trial_vectors is None:
+            return
+
+        improved = trial_fitnesses > self.fitnesses
+        self.population[improved] = self.trial_vectors[improved]
+        self.fitnesses[improved] = trial_fitnesses[improved]
     
     def get_best_solution(self) -> np.ndarray:
         """Return current best solution.
@@ -243,8 +262,11 @@ class DE(Optimizer):
             f=self.f,
             cr=self.cr,
             strategy=self.strategy,
-            bounds=self.bounds,
-            previous_best=getattr(self, 'previous_best', None)
+            has_bounds=self.bounds is not None,
+            bounds=self.bounds if self.bounds is not None else np.zeros((2, self.solution_length), dtype=np.float32),
+            scored=self._scored,
+            previous_best=float(getattr(self, 'previous_best', 0.0)),
+            has_previous_best=hasattr(self, 'previous_best')
         )
     
     @classmethod
@@ -257,8 +279,8 @@ class DE(Optimizer):
         Returns:
             DE instance with loaded state
         """
-        data = np.load(filename, allow_pickle=True)
-        
+        data = np.load(filename)
+
         # Create optimizer with basic parameters
         optimizer = cls(
             solution_length=int(data['solution_length']),
@@ -266,18 +288,19 @@ class DE(Optimizer):
             f=float(data['f']),
             cr=float(data['cr']),
             strategy=str(data['strategy']),
-            bounds=data['bounds'] if 'bounds' in data and data['bounds'] is not None else None
+            bounds=data['bounds'] if bool(data['has_bounds']) else None
         )
-        
+
         # Load state
         optimizer.population = data['population']
         optimizer.fitnesses = data['fitnesses']
         optimizer.best_idx = int(data['best_idx'])
         optimizer.generation = int(data['generation'])
-        
-        if 'previous_best' in data and data['previous_best'] is not None:
+        optimizer._scored = bool(data['scored'])
+
+        if bool(data['has_previous_best']):
             optimizer.previous_best = float(data['previous_best'])
-            
+
         return optimizer
     
     def reset(self, population: Optional[np.ndarray] = None, f: Optional[float] = None, cr: Optional[float] = None) -> None:
@@ -305,5 +328,7 @@ class DE(Optimizer):
         self.fitnesses = np.zeros(self.population_count, dtype=np.float32)
         self.best_idx = 0
         self.generation = 0
+        self._scored = False
+        self.trial_vectors = None
         if hasattr(self, 'previous_best'):
             delattr(self, 'previous_best') 

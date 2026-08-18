@@ -40,7 +40,8 @@ from pyevo.utils.acceleration import (
     parallel_evaluate,
     optimize_with_acceleration,
     save_checkpoint,
-    load_checkpoint
+    load_checkpoint,
+    apply_checkpoint
 )
 
 # Import interactive utilities
@@ -93,6 +94,7 @@ __all__ = [
     "optimize_with_acceleration",
     "save_checkpoint",
     "load_checkpoint",
+    "apply_checkpoint",
     
     # Interactive utilities
     "InteractiveOptimizer",

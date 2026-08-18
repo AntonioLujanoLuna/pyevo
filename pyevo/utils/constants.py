@@ -25,6 +25,9 @@ OPTIMIZERS = {
 }
 DEFAULT_OPTIMIZER = "snes"
 
-# File paths
-DEFAULT_OUTPUT_DIR = "examples/output"        # Default output directory
-DEFAULT_CHECKPOINT_DIR = "examples/checkpoints"  # Default checkpoint directory 
+# File paths. These are resolved relative to the current working directory of
+# whatever process uses them, so they must not be repo-relative: the old
+# "examples/output" default created an examples/ tree wherever a user ran their
+# own script.
+DEFAULT_OUTPUT_DIR = "output"            # Default output directory
+DEFAULT_CHECKPOINT_DIR = "checkpoints"   # Default checkpoint directory 

@@ -18,7 +18,7 @@ from pathlib import Path
 import numpy as np
 from typing import Any, Callable, Optional, Tuple
 
-from pyevo.utils.acceleration import save_checkpoint, load_checkpoint
+from pyevo.utils.acceleration import save_checkpoint, load_checkpoint, apply_checkpoint
 
 class InteractiveOptimizer:
     """
@@ -321,21 +321,37 @@ class InteractiveOptimizer:
         if optimizer_state is None or session_info is None:
             raise ValueError(f"Failed to load checkpoint from {checkpoint_path}")
         
-        # Determine optimizer type from state
-        from pyevo.optimizers import SNES, CMA_ES, PSO
-        
-        # Create the appropriate optimizer
-        if "C" in optimizer_state:  # CMA-ES has a covariance matrix
-            optimizer = CMA_ES(solution_length=optimizer_state["solution_length"])
-        elif "velocities" in optimizer_state:  # PSO has velocities
-            optimizer = PSO(solution_length=optimizer_state["solution_length"])
-        else:  # Default to SNES
-            optimizer = SNES(solution_length=optimizer_state["solution_length"])
-        
-        # Set optimizer state
-        for key, value in optimizer_state.items():
-            if hasattr(optimizer, key):
-                setattr(optimizer, key, value)
+        # Rebuild the optimizer as the type that actually wrote the checkpoint.
+        # This previously knew only three optimizers and silently restored
+        # everything else as SNES, quietly changing the algorithm on resume.
+        from pyevo.optimizers import (
+            SNES, CMA_ES, PSO, DE, SimulatedAnnealing,
+            GeneticAlgorithm, CrossEntropyMethod,
+        )
+
+        registry = {
+            cls.__name__: cls for cls in (
+                SNES, CMA_ES, PSO, DE, SimulatedAnnealing,
+                GeneticAlgorithm, CrossEntropyMethod,
+            )
+        }
+
+        solution_length = int(optimizer_state["solution_length"])
+        class_name = optimizer_state.get("_class_name")
+
+        if class_name in registry:
+            optimizer_cls = registry[class_name]
+        elif "C" in optimizer_state:      # pre-_class_name checkpoints
+            optimizer_cls = CMA_ES
+        elif "velocities" in optimizer_state:
+            optimizer_cls = PSO
+        else:
+            optimizer_cls = SNES
+
+        optimizer = optimizer_cls(solution_length=solution_length)
+
+        # Restore saved attributes, including the RNG stream.
+        apply_checkpoint(optimizer, optimizer_state)
         
         # Create interactive optimizer
         interactive_opt = cls(optimizer, fitness_function)

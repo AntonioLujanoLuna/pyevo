@@ -15,12 +15,16 @@ setup(
     packages=find_packages(),
     classifiers=[
         "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
         "Intended Audience :: Science/Research",
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
     ],
-    python_requires=">=3.6",
+    python_requires=">=3.9",
     install_requires=[
         "numpy>=1.19.0",
     ],
@@ -39,7 +43,7 @@ setup(
         ],
         "image": [
             "scipy>=1.7.0",
-            "scikit-image>=0.18.0",
+            "scikit-image>=0.19.0",
         ],
         "test": [
             "pytest>=6.0.0",
@@ -61,9 +65,8 @@ setup(
             "imageio>=2.9.0",
             "tqdm>=4.65.0",
             "imageio[ffmpeg]",
-            "cupy>=12.0.0",
             "scipy>=1.7.0",
-            "scikit-image>=0.18.0",
+            "scikit-image>=0.19.0",
             "pytest>=6.0.0",
             "pytest-cov>=2.10.0",
             "sphinx>=4.0.0",

@@ -21,7 +21,7 @@ from tqdm import tqdm
 import hashlib
 
 # Add parent directory to path to import the SNES module and utils
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from pyevo.optimizers import SNES
 from pyevo.utils.image import calculate_ssim, convolve2d
 from pyevo.utils.constants import (
@@ -603,16 +603,18 @@ def main():
     # Create output directory if it doesn't exist
     os.makedirs(args.output_dir, exist_ok=True)
     
-    # Set default output paths if not specified
+    # Set default output paths if not specified. These are bare filenames: the
+    # save sites below are the single place that joins output_dir, so joining it
+    # here too produced nested paths like output/output/image_approximated.jpg.
     if args.output is None:
         # Extract base name from input image
         base_name = os.path.splitext(os.path.basename(args.image))[0]
-        args.output = os.path.join(args.output_dir, f"{base_name}_approximated.jpg")
+        args.output = f"{base_name}_approximated.jpg"
     
     if args.gif is None and args.mp4 is None:
         # Set default animation output path
         base_name = os.path.splitext(os.path.basename(args.image))[0]
-        args.gif = os.path.join(args.output_dir, f"{base_name}_evolution.gif")
+        args.gif = f"{base_name}_evolution.gif"
     
     # Parameters
     num_rects = args.rects

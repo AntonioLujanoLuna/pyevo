@@ -43,9 +43,11 @@ class SNES(Optimizer):
         Args:
             solution_length: Length of solution vector (dimensionality of search space)
             population_count: Size of population (default is based on solution length)
-            alpha: Learning rate (default 0.05)
+            alpha: Scale of the default initial standard deviation (default 0.05).
+                   Ignored when an explicit `sigma` is given.
             center: Initial center (mean) vector (default zeros)
-            sigma: Initial standard deviation vector (default ones scaled by alpha)
+            sigma: Initial standard deviation vector (default: ones * alpha).
+                   Used as-is; it is NOT rescaled by alpha.
             random_seed: Seed for random number generation
         """
         # Set population count
@@ -71,10 +73,16 @@ class SNES(Optimizer):
             self.center: np.ndarray = np.array(center, dtype=np.float32)
             
         # Initialize std deviation (sigma)
+        self.alpha: float = alpha
         if sigma is None:
             self.sigma: np.ndarray = np.ones(solution_length, dtype=np.float32) * alpha
         else:
-            self.sigma: np.ndarray = np.array(sigma, dtype=np.float32) * alpha
+            # Use the caller's sigma verbatim. Multiplying by alpha here used to
+            # silently shrink both explicit sigmas and every load_state() round
+            # trip by a factor of alpha.
+            self.sigma = np.broadcast_to(
+                np.asarray(sigma, dtype=np.float32), (solution_length,)
+            ).astype(np.float32).copy()
             
         # Precalculate utility weights
         self.utility_weights: np.ndarray = self._get_weight_vector()
@@ -90,13 +98,11 @@ class SNES(Optimizer):
             Array of utility weights for each rank position
         """
         n = self.population_count
-        weights = np.zeros(n, dtype=np.float32)
-        
-        # Calculate raw weights: max(0, log(n/2 + 1) - log(1 + i))
-        for i in range(n):
-            u = np.log(n/2 + 1) - np.log(1 + i)
-            weights[i] = max(0, u)
-            
+
+        # Raw weights: max(0, log(n/2 + 1) - log(1 + i))
+        ranks = np.arange(n, dtype=np.float32)
+        weights = np.maximum(0.0, np.log(n / 2 + 1) - np.log(1 + ranks)).astype(np.float32)
+
         # Normalize weights
         sum_weights = np.sum(weights)
         weights = weights / sum_weights - 1.0 / n
@@ -111,11 +117,10 @@ class SNES(Optimizer):
         """
         # Generate Gaussian noise
         self.gaussians = self.rng.randn(self.population_count, self.solution_length).astype(np.float32)
-        
-        # Create solutions by adding noise to center
-        for i in range(self.population_count):
-            self.solutions[i] = self.center + self.sigma * self.gaussians[i]
-            
+
+        # Broadcast instead of looping over the population.
+        self.solutions = self.center + self.sigma * self.gaussians
+
         return self.solutions
     
     def tell(self, fitnesses: Sequence[float], tolerance: float = 1e-6) -> float:
@@ -133,20 +138,20 @@ class SNES(Optimizer):
             raise ValueError("Mismatch between population size and fitness values")
         
         # Sort indices by fitness (descending order)
-        indices = np.argsort(-np.array(fitnesses))
-        
-        # Get utilities for each rank
-        utilities = self.utility_weights[np.arange(len(indices))]
-        
-        # Vectorized calculation of deltas
-        for j in range(self.solution_length):
-            noises = self.gaussians[indices, j]
-            delta_mu = np.sum(utilities * noises)
-            delta_sigma = np.sum(utilities * (noises**2 - 1))
-            
-            # Update center and sigma
-            self.center[j] += self.eta_center * self.sigma[j] * delta_mu
-            self.sigma[j] *= np.exp(0.5 * self.eta_sigma * delta_sigma)
+        indices = np.argsort(-np.asarray(fitnesses))
+
+        # Utility weight per rank; row i of sorted_noise is the i-th best sample.
+        utilities = self.utility_weights
+        sorted_noise = self.gaussians[indices]
+
+        # Fully vectorized natural-gradient step. The previous implementation
+        # looped over solution_length in Python, which dominated runtime on the
+        # high-dimensional problems this optimizer targets.
+        delta_mu = utilities @ sorted_noise
+        delta_sigma = utilities @ (sorted_noise ** 2 - 1.0)
+
+        self.center += self.eta_center * self.sigma * delta_mu
+        self.sigma *= np.exp(0.5 * self.eta_sigma * delta_sigma)
         
         # Return improvement metric for early stopping
         best_fitness = np.max(fitnesses)
@@ -180,14 +185,18 @@ class SNES(Optimizer):
         Args:
             filename: Path to save the state
         """
-        np.savez(
-            filename, 
-            center=self.center, 
-            sigma=self.sigma, 
-            solution_length=self.solution_length,
-            population_count=self.population_count,
-            previous_best=getattr(self, 'previous_best', None)
-        )
+        state = {
+            "center": self.center,
+            "sigma": self.sigma,
+            "solution_length": self.solution_length,
+            "population_count": self.population_count,
+            "alpha": self.alpha,
+        }
+        # Only write previous_best when it exists. Writing None produced an
+        # object array that np.load could not read back without allow_pickle.
+        if hasattr(self, "previous_best"):
+            state["previous_best"] = float(self.previous_best)
+        np.savez(filename, **state)
     
     @classmethod
     def load_state(cls, filename: str) -> 'SNES':
@@ -203,10 +212,11 @@ class SNES(Optimizer):
         optimizer = cls(
             solution_length=int(data['solution_length']),
             population_count=int(data['population_count']),
+            alpha=float(data['alpha']) if 'alpha' in data else 0.05,
             center=data['center'],
             sigma=data['sigma']
         )
-        if 'previous_best' in data and data['previous_best'] is not None:
+        if 'previous_best' in data:
             optimizer.previous_best = float(data['previous_best'])
         return optimizer
     

@@ -138,6 +138,10 @@ class PSO(Optimizer):
     def get_stats(self) -> dict:
         """Return current optimizer statistics."""
         return {
+            # "best_fitness" is the key every other optimizer reports and the
+            # one optimize_with_acceleration reads; PSO only had the alias
+            # below, so its recorded best fitness silently defaulted to 0.
+            "best_fitness": float(self.global_best_fitness),
             "global_best_fitness": float(self.global_best_fitness),
             "position_mean": float(np.mean(self.positions)),
             "position_min": float(np.min(self.positions)),
@@ -156,8 +160,45 @@ class PSO(Optimizer):
             global_best_position=self.global_best_position,
             global_best_fitness=self.global_best_fitness,
             solution_length=self.solution_length,
-            population_count=self.population_count
+            population_count=self.population_count,
+            center=self.center,
+            sigma=self.sigma,
+            omega=self.omega,
+            phi_p=self.phi_p,
+            phi_g=self.phi_g
         )
+
+    @classmethod
+    def load_state(cls, filename: str) -> 'PSO':
+        """Load optimizer state from file.
+
+        Args:
+            filename: Path to load the state from
+
+        Returns:
+            PSO instance with the saved swarm restored
+        """
+        data = np.load(filename)
+
+        optimizer = cls(
+            solution_length=int(data['solution_length']),
+            population_count=int(data['population_count']),
+            center=data['center'],
+            sigma=data['sigma'],
+            omega=float(data['omega']),
+            phi_p=float(data['phi_p']),
+            phi_g=float(data['phi_g'])
+        )
+
+        # Restore the swarm itself, not just its initialization parameters.
+        optimizer.positions = data['positions']
+        optimizer.velocities = data['velocities']
+        optimizer.personal_best_positions = data['personal_best_positions']
+        optimizer.personal_best_fitnesses = data['personal_best_fitnesses']
+        optimizer.global_best_position = data['global_best_position']
+        optimizer.global_best_fitness = float(data['global_best_fitness'])
+
+        return optimizer
     
     def reset(self, center: Optional[Sequence[float]] = None, sigma: Optional[Sequence[float]] = None):
         """Reset the optimizer with optional new center and sigma."""

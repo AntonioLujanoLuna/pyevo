@@ -1,140 +1,141 @@
-# PyEvo Improvements
+# PyEvo — Correctness and Packaging Fixes
 
-This document outlines the improvements made to the PyEvo package based on the code review feedback.
+This document records defects found in PyEvo and what was done about them.
+Everything listed as fixed has a regression test in `tests/test_regressions.py`.
 
-## Utility Organization
+## Correctness bugs
 
-**Issue:** The utilities were split between `pyevo/utils.py` and a separate `utils/` directory, causing confusion.
+### DE never optimized anything
+`DE.tell()` built trial vectors, stored them on `self.trial_vectors`, and then
+returned. `_selection()` — the method that would have replaced parents with
+better offspring — was never called from anywhere, and `self.population` was
+never reassigned after initialization. `ask()` returned the same initial random
+population on every generation, so DE's fitness was flat forever.
 
-**Solution:**
-- Created a structured `pyevo/utils/` package with specialized modules:
-  - `acceleration.py`: GPU and parallel processing utilities
-  - `image.py`: Image processing functions with optional SciPy integration
-  - `interactive.py`: Interactive optimization control
-  - `constants.py`: Global constants
+Fixed by giving DE a real ask/tell cycle: the first `ask()` returns the initial
+population to be scored, every later `ask()` returns fresh trial vectors, and
+`tell()` performs greedy one-to-one selection against the stored parent
+fitnesses.
 
-This organization maintains a clear separation of concerns while keeping all utilities within the main package.
+### CMA-ES produced NaN in low dimensions
+`cc` and `cs` were both set to `4/n`, which exceeds 1 for `n < 4`. That inverts
+the sign of the evolution-path cumulation and puts a negative value under the
+`sqrt(cc * (2 - cc))` term, yielding NaN at `n = 1` and a collapsed step size at
+`n = 2`. Replaced with the canonical expressions, which stay in `(0, 1)` for
+every dimensionality.
 
-## Import Patterns
+### CMA-ES was not really CMA-ES
+Two of the algorithm's defining mechanisms were missing:
 
-**Issue:** The code sometimes tried importing from the installed package first, then fell back to local imports by manipulating sys.path, which can be confusing for contributors.
+- `cmu` was hardcoded to `0.0`, disabling the rank-mu covariance update.
+- The recombination weights covered all `lambda` samples with positive weight,
+  so the *worst* solutions still pulled the mean toward them. Canonical CMA-ES
+  truncates at `mu = lambda / 2`.
 
-**Solution:**
-- Maintained the fallback pattern for examples to ensure they work both when installed and in development
-- Updated the import statements to use the new package structure
-- Improved consistency across the codebase
-- Added development dependencies in setup.py to encourage proper installation with `pip install -e .`
+Both are now implemented, along with the `hsig` variance correction and an
+eigendecomposition cadence that scales with how fast `C` actually changes
+(previously a fixed "every 10 generations", which let `B` and `D` drift
+arbitrarily far from `C`). On a rotated ellipsoid with condition number 1e6,
+this reaches a target of 1e-10 in a median of 538 generations versus 977 before.
 
-## Custom Image Processing Functions
+### Simulated Annealing reported zero improvement
+`improvement` was computed *after* `self.best_fitness` had already been
+reassigned to the new value, so the expression was identically zero whenever a
+new best was found. Early stopping therefore triggered precisely when the search
+was making progress. `min_temp` was also stored but never enforced, letting the
+temperature decay toward zero and divide into the acceptance probability. The
+default `initial_temp` of 100 made the search a near-pure random walk on
+typically-scaled objectives; it is now 1.0.
 
-**Issue:** Custom SSIM and convolution functions were implemented instead of using optimized libraries like SciPy.
+### SNES silently shrank sigma on every resume
+`__init__` multiplied any caller-supplied `sigma` by `alpha`. Because
+`load_state()` passes the saved sigma back through `__init__`, every
+save/load round trip shrank sigma by a factor of `alpha` (0.05 by default) —
+a silent 20x change in search scale per resume. An explicit `sigma` is now used
+verbatim; `alpha` only scales the default.
 
-**Solution:**
-- Kept the custom implementations for zero-dependency scenarios
-- Added optional SciPy/scikit-image integration with automatic detection
-- Created a `get_optimal_image_functions()` helper to automatically select the best available implementation
-- Added proper dependencies in setup.py under the "image" extra
+### Checkpoints restored the wrong optimizer
+`InteractiveOptimizer.load_session()` inferred the optimizer type from state
+keys and knew only SNES, CMA-ES, and PSO — everything else silently came back as
+SNES, changing the algorithm mid-run. Checkpoints now record the class that
+wrote them. The RNG state was also dropped, so resumed runs did not reproduce
+the original random stream; it is now saved and restored.
 
-## GPU Resource Management
+### PSO reported its best fitness under a different key
+Every other optimizer reports `best_fitness` from `get_stats()`; PSO reported
+only `global_best_fitness`. `optimize_with_acceleration` reads `best_fitness`
+with a default of 0, so PSO runs recorded a best fitness of 0 throughout.
 
-**Issue:** The CuPy implementation could benefit from more explicit memory management, especially for large-scale optimization tasks.
+### Early stopping fired on the first flat generation
+`optimize_with_acceleration` broke out of the loop the first time `improvement`
+fell below a hardcoded `1e-8`. For a stochastic optimizer a single flat or
+negative generation is entirely normal, so runs terminated after a handful of
+iterations. Tolerance and patience are now parameters, and stopping requires
+`patience` *consecutive* stalled generations.
 
-**Solution:**
-- Added explicit memory management functions:
-  - `get_gpu_memory_info()`: Get current GPU memory usage
-  - `clear_gpu_memory()`: Explicitly free all unused GPU memory
-  - Memory-aware batch sizing that adjusts based on available GPU memory
-  - Added cleanup in try/finally blocks to ensure proper memory release
-- Enhanced the `batch_process()` function to manage memory better during processing
-- Added memory usage tracking to `optimize_with_acceleration()`
+## Interface consistency
 
-## Checkpointing System
+- `SimulatedAnnealing` rejected `population_count`, so it could not be used
+  interchangeably with the other optimizers. It now accepts it and proposes that
+  many neighbours per step.
+- `PSO` had no `load_state`, so it could not be resumed at all. `load_state` is
+  now part of the `Optimizer` contract and all seven implement it.
+- `save_state` wrote `None` into `np.savez` for absent optional fields, creating
+  object arrays that `np.load` refuses to read without `allow_pickle=True`.
+  Saving a fresh optimizer therefore produced an unloadable file. Optional
+  fields now use `pack_optional`/`unpack_optional` in `pyevo.optimizers.base`.
+- `DE`, `GA`, and `CEM` could not round-trip at all with the default
+  `bounds=None`, for the same reason.
 
-**Issue:** The checkpointing system saved optimizer state but session information separately, potentially leading to synchronization issues.
+## Packaging
 
-**Solution:**
-- Created a unified checkpointing approach in `acceleration.py`:
-  - `save_checkpoint()`: Save optimizer state and session info in a single file
-  - `load_checkpoint()`: Load both from a single file
-- Enhanced the `InteractiveOptimizer` to use this unified system
-- Added automatic checkpointing to `optimize_with_acceleration()`
-- Improved error handling during saving/loading
+- `install_requires` listed only NumPy, but `import pyevo` reached
+  `pyevo/utils/image.py`, which imported Pillow unconditionally. A clean
+  `pip install pyevo` followed by `import pyevo` raised `ModuleNotFoundError`.
+  Pillow is now imported lazily at its single use site.
+- `python_requires` claimed 3.6+, but the codebase uses PEP 585 builtin generics
+  (`dict[str, Any]`) in evaluated annotations, which need 3.9+.
+- The `all` extra pulled in a CUDA-specific CuPy wheel, so it failed to install
+  on any machine without CUDA. GPU support is now only in the `gpu` extra.
+- `scikit-image` was allowed from 0.18, but `scipy_ssim` passed `multichannel=`,
+  which was deprecated in 0.19 and removed in 0.23. Now uses `channel_axis`.
 
-## Test Coverage
+## Performance and memory
 
-**Issue:** Tests focused on core functionality but could be expanded to cover GPU acceleration, parallel processing, and edge cases.
+- `SNES.tell()` was labelled "vectorized" but looped over `solution_length` in
+  Python. At 5,000 dimensions this took 46 ms per generation; the vectorized
+  form takes under 1 ms for bit-identical results. `ask()` and the utility
+  weights were vectorized too.
+- `parallel_evaluate` passed a locally-defined closure to
+  `ProcessPoolExecutor`, which cannot pickle local objects — so the parallel
+  path raised `AttributeError: Can't pickle local object` every time it ran. It
+  now uses a module-level worker with `functools.partial`, and falls back to
+  serial evaluation with a warning if the fitness function itself is
+  unpicklable.
+- `CEM`'s `diagonal_cov=True` still allocated a full `n x n` covariance matrix,
+  defeating the option's entire purpose (400 MB at n=10,000). It now stores a
+  length-`n` variance vector.
+- `CEM`'s default `population_count` of `10 * solution_length` was uncapped,
+  asking for 50,000 evaluations per generation on a 5,000-parameter problem. Now
+  capped at 200, matching DE's existing treatment.
+- `CEM.get_stats()` reported `cov_determinant`, which underflows to exactly 0 in
+  even moderate dimensions. Replaced with `cov_logdet`.
 
-**Solution:**
-- Added a new test file `tests/test_acceleration.py` that covers:
-  - GPU detection and memory management
-  - Array transfers between CPU and GPU
-  - Batch processing on both CPU and GPU
-  - Parallel evaluation with different worker counts
-  - Full optimization with different acceleration methods
-  - Tests that gracefully handle the absence of GPU
+## Housekeeping
 
-## New Features and Improvements
-
-- **Enhanced CMA-ES Implementation**: Added proper evolution path updates and covariance matrix adaptation
-- **Generalized Interactive Optimizer**: Made it work with all optimizer types, not just SNES
-- **Unified API**: Consistent interface across all utilities and optimizers
-- **Improved Examples**: Added an advanced example demonstrating the new features
-- **Better Documentation**: Added docstrings and comments throughout the codebase
-- **Expanded Dependencies**: Added optional dependencies for different use cases
-- **Development Tools**: Added testing and development tools as optional dependencies
-
-## Using the Improvements
-
-### Standard Import Pattern
-
-```python
-from pyevo import (
-    # Optimizers
-    SNES, CMA_ES, PSO,
-    
-    # Acceleration
-    optimize_with_acceleration, is_gpu_available,
-    
-    # Image processing
-    calculate_ssim, get_optimal_image_functions,
-    
-    # Interactive mode
-    InteractiveOptimizer
-)
-```
-
-### GPU Acceleration
-
-```python
-# Check if GPU is available
-if is_gpu_available():
-    # Run with GPU acceleration
-    best_solution, best_fitness, stats = optimize_with_acceleration(
-        optimizer=optimizer,
-        fitness_func=my_function,
-        max_iterations=100,
-        use_gpu=True  # Enable GPU
-    )
-```
-
-### Image Processing with Optimal Implementation
-
-```python
-# Get the best available implementations
-ssim_func, conv_func = get_optimal_image_functions()
-
-# Use them for processing
-similarity = ssim_func(image1, image2)
-```
-
-### Unified Checkpointing
-
-```python
-# Save optimizer state and session info
-save_checkpoint(optimizer, session_info, "checkpoint.npz")
-
-# Load both from a single file
-optimizer_state, session_info = load_checkpoint("checkpoint.npz")
-```
-
-These improvements make the PyEvo package more organized, efficient, and user-friendly while maintaining compatibility with existing code. 
+- Deleted `pyevo/utils.py`, a dead module shadowed by the `pyevo/utils/`
+  package. (The previous version of this document claimed this had been done.)
+- `DEFAULT_OUTPUT_DIR` was `"examples/output"` — a repo-relative path baked into
+  library code, which created an `examples/` tree in the working directory of
+  any program using it. Now `"output"`.
+- `image_approximation.py` joined `output_dir` into the default output paths and
+  then joined it again at every save site, producing
+  `examples/output/examples/output/...`. The artifacts of that bug were
+  committed to the repository; they have been moved to the correct path.
+- All eight examples had a `sys.path` fallback pointing one directory too
+  shallow (`..` instead of `../..`), so running any example from a checkout
+  without installing the package failed with `ModuleNotFoundError`.
+- Added GitHub Actions CI across Python 3.9–3.12. It installs with core
+  dependencies only and asserts `import pyevo` works before running the suite,
+  then repeats with the optional extras installed. The test suite was red at the
+  previous commit; the absence of CI is why that went unnoticed.

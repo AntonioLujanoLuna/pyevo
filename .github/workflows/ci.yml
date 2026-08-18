@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: test (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # Install with core dependencies only. This is the step that catches an
+      # `import pyevo` which secretly needs an optional dependency.
+      - name: Install package (core deps only)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[test]"
+
+      - name: Import with numpy alone
+        run: python -c "import pyevo; print(pyevo.__version__)"
+
+      - name: Run tests (core deps only)
+        run: pytest tests/ -v
+
+      - name: Install optional extras
+        run: pip install -e ".[test,examples,image]"
+
+      - name: Run tests (with optional extras)
+        run: pytest tests/ -v

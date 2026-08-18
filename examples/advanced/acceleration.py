@@ -24,7 +24,7 @@ try:
     )
 except ImportError:
     # Add parent directory to path
-    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
     from pyevo import (
         SNES, CMA_ES, PSO,
         optimize_with_acceleration,
